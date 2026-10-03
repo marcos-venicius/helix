@@ -303,6 +303,7 @@
 | `suspend` | Suspend and return to shell | normal: `` <C-z> ``, select: `` <C-z> `` |
 | `claude_code` | Toggle the Claude Code popup (starts a session with file/selection context) | normal: `` <space>i ``, select: `` <space>i `` |
 | `claude_session_picker` | Open Claude Code session picker | normal: `` <space>I ``, select: `` <space>I `` |
+| `git_diff_view` | Open a side by side git diff of the current file | normal: `` <space>= ``, select: `` <space>= `` |
 | `rename_symbol` | Rename symbol | normal: `` <space>r ``, select: `` <space>r `` |
 | `increment` | Increment item under cursor | normal: `` <C-a> ``, select: `` <C-a> `` |
 | `decrement` | Decrement item under cursor | normal: `` <C-x> ``, select: `` <C-x> `` |

@@ -47,6 +47,7 @@ use helix_core::{
 use helix_view::{
     editor::Action,
     graphics::{CursorKind, Margin, Modifier, Rect},
+    input::KeyEvent,
     theme::Style,
     view::ViewPosition,
     Document, DocumentId, Editor,
@@ -269,6 +270,8 @@ pub struct Picker<T: 'static + Send + Sync, D: 'static> {
     /// An event handler for syntax highlighting the currently previewed file.
     preview_highlight_handler: Sender<Arc<Path>>,
     dynamic_query_handler: Option<Sender<DynamicQueryChange>>,
+    /// Extra keys that run a handler on the selected item and close the picker.
+    key_handlers: Vec<(KeyEvent, PickerKeyHandler<T>)>,
 }
 
 impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
@@ -394,6 +397,7 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
             file_fn: None,
             preview_highlight_handler: PreviewHighlightHandler::<T, D>::default().spawn(),
             dynamic_query_handler: None,
+            key_handlers: Vec::new(),
         }
     }
 
@@ -452,6 +456,16 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
 
     pub fn with_default_action(mut self, action: Action) -> Self {
         self.default_action = action;
+        self
+    }
+
+    /// Pressing `key` runs `handler` on the selected item and closes the picker.
+    pub fn with_key_handler(
+        mut self,
+        key: KeyEvent,
+        handler: impl Fn(&mut Context, &T) + 'static,
+    ) -> Self {
+        self.key_handlers.push((key, Box::new(handler)));
         self
     }
 
@@ -1086,6 +1100,13 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
             EventResult::Consumed(Some(callback))
         };
 
+        if let Some((_, handler)) = self.key_handlers.iter().find(|(key, _)| *key == key_event) {
+            if let Some(option) = self.selection() {
+                handler(ctx, option);
+            }
+            return close_fn(self);
+        }
+
         match key_event {
             shift!(Tab) | key!(Up) | ctrl!('p') => {
                 self.move_by(1, Direction::Backward);
@@ -1205,3 +1226,4 @@ impl<T: 'static + Send + Sync, D> Drop for Picker<T, D> {
 }
 
 type PickerCallback<T> = Box<dyn Fn(&mut Context, &T, Action)>;
+type PickerKeyHandler<T> = Box<dyn Fn(&mut Context, &T)>;
