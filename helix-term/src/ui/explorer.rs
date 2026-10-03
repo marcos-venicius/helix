@@ -311,7 +311,7 @@ impl Explorer {
                     return;
                 }
                 let is_dir = input.ends_with('/');
-                let path = dir.join(input.trim_end_matches('/'));
+                let path = helix_stdx::path::normalize(dir.join(input.trim_end_matches('/')));
                 if path.exists() {
                     cx.editor
                         .set_error(format!("{} already exists", path.display()));
@@ -342,7 +342,7 @@ impl Explorer {
                 }
                 let new = old.parent().unwrap_or(Path::new("")).join(input);
                 match move_entry(cx.editor, &old, &new) {
-                    Ok(()) => refresh_later(cx, new),
+                    Ok(new) => refresh_later(cx, new),
                     Err(err) => cx.editor.set_error(format!("Failed to rename: {err}")),
                 }
             },
@@ -356,8 +356,7 @@ impl Explorer {
         let Some(name) = cut.file_name() else {
             bail!("can't move {}", cut.display());
         };
-        let new = self.target_dir().join(name);
-        move_entry(editor, &cut, &new)?;
+        let new = move_entry(editor, &cut, &self.target_dir().join(name))?;
         self.cut = None;
         self.refresh(editor);
         self.reveal(&new);
@@ -553,11 +552,14 @@ fn refresh_later(cx: &mut compositor::Context, path: PathBuf) {
     });
 }
 
-/// Moves or renames `old` to `new`, creating the missing parent directories. Open buffers follow
-/// the file, including the ones inside a moved directory.
-fn move_entry(editor: &mut Editor, old: &Path, new: &Path) -> anyhow::Result<()> {
+/// Moves or renames `old` to `new`, creating the missing parent directories, and returns where it
+/// went: `new`, normalized. Open buffers follow the file, including the ones inside a moved
+/// directory.
+fn move_entry(editor: &mut Editor, old: &Path, new: &Path) -> anyhow::Result<PathBuf> {
+    // A rename to `../name` would otherwise leave `..` in the paths of the buffers below.
+    let new = helix_stdx::path::normalize(new);
     if old == new {
-        return Ok(());
+        return Ok(new);
     }
     if new.exists() {
         bail!("{} already exists", new.display());
@@ -580,11 +582,11 @@ fn move_entry(editor: &mut Editor, old: &Path, new: &Path) -> anyhow::Result<()>
     } else {
         Vec::new()
     };
-    editor.move_path(old, new)?;
+    editor.move_path(old, &new)?;
     for (id, path) in inside {
         editor.set_doc_path(id, &path);
     }
-    Ok(())
+    Ok(new)
 }
 
 fn build_tree(root: &Path, expanded: &HashSet<PathBuf>, hide_ignored: bool) -> Vec<Node> {
