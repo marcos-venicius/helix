@@ -4,14 +4,16 @@
 //!
 //! The panel lives in [`EditorView`], which shrinks the editor area to make room for it and hands
 //! it the keys while it is focused. Keys the panel doesn't use go to the editor keymap only when
-//! they lead to the space menu or the command line, and the panel gives the focus back as soon as
-//! the editor shows another view or buffer (a picker or `:open` opened a file, ...).
+//! they lead to a command that opens a picker or a prompt (`space f`, `:`, ...), never to one that
+//! would edit the buffer hidden behind the panel. The panel gives the focus back as soon as the
+//! editor moves to another view, buffer or selection (a picker opened a file, `:42`, ...).
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use anyhow::bail;
+use helix_core::Selection;
 use helix_view::document::Mode;
 use helix_view::editor::Action;
 use helix_view::graphics::{Modifier, Rect, Style};
@@ -63,9 +65,10 @@ pub struct Explorer {
     hiding: bool,
     /// Path waiting for the `y` that confirms its deletion.
     confirm_delete: Option<PathBuf>,
-    /// The view and buffer the editor showed while the panel had the focus. When they change, the
-    /// user went back to editing, so the panel gives the focus back.
-    focus_target: Option<(ViewId, DocumentId)>,
+    /// The view, buffer and selection of the editor while the panel had the focus. When they
+    /// change, the user went back to editing (a picker opened a file, `:42` moved the cursor...),
+    /// so the panel gives the focus back.
+    focus_target: Option<(ViewId, DocumentId, Selection)>,
     /// File of the current buffer last revealed by `follow`.
     followed: Option<PathBuf>,
 }
@@ -131,16 +134,27 @@ impl Explorer {
     }
 
     fn sync_focus_target(&mut self, editor: &Editor) {
-        let (view, doc) = current_ref!(editor);
-        self.focus_target = Some((view.id, doc.id()));
+        self.focus_target = Some(focus_target(editor));
     }
 
-    /// Gives the focus back to the editor when it shows another view or buffer than when the panel
-    /// last handled an event.
+    /// Gives the focus back to the editor when it shows another view, buffer or selection than
+    /// when the panel last handled an event.
     fn check_focus_target(&mut self, editor: &Editor) {
-        let (view, doc) = current_ref!(editor);
-        if self.focused && self.focus_target != Some((view.id, doc.id())) {
+        if self.focused && self.focus_target.as_ref() != Some(&focus_target(editor)) {
             self.unfocus();
+        }
+    }
+
+    /// Catches up with what happened in the editor since the last render: gives the focus back,
+    /// applies `hide-gitignored` and reveals the current file. Runs before the views are drawn,
+    /// which depend on the focus, after every event wherever it went (a picker, a command, a job).
+    pub fn update(&mut self, editor: &Editor) {
+        self.check_focus_target(editor);
+        if self.hiding != self.hide_ignored(editor) {
+            self.refresh(editor);
+        }
+        if editor.config().explorer.auto_reveal {
+            self.follow(doc!(editor).path());
         }
     }
 
@@ -279,17 +293,19 @@ impl Explorer {
     }
 
     /// Handles a key when the panel is focused. Returns `None` when the key is for the editor: the
-    /// panel isn't focused, or the key leads to the space menu or the command line, so `space E`,
-    /// the pickers and commands keep working from the panel. While a deletion waits for its
-    /// confirmation the panel takes every key, so that only the very next one can confirm it.
+    /// panel isn't focused, or the key leads to a command that opens a picker or a prompt, so
+    /// `space E`, the pickers and `:` keep working from the panel. Key sequences that lead
+    /// elsewhere are cancelled. While a deletion waits for its confirmation the panel takes every
+    /// key, so that only the very next one can confirm it.
     pub fn handle_key(
         &mut self,
         key: KeyEvent,
         mode: Mode,
-        keymaps: &Keymaps,
+        keymaps: &mut Keymaps,
         cx: &mut commands::Context,
     ) -> Option<KeyResult> {
-        if !self.focused {
+        // A sticky menu entered before the panel took the focus keeps its keys, until `esc`.
+        if !self.focused || keymaps.sticky().is_some() {
             return None;
         }
         let result = self.handle_focused_key(key, mode, keymaps, cx);
@@ -304,9 +320,27 @@ impl Explorer {
         &mut self,
         key: KeyEvent,
         mode: Mode,
-        keymaps: &Keymaps,
+        keymaps: &mut Keymaps,
         cx: &mut commands::Context,
     ) -> Option<KeyResult> {
+        if !keymaps.pending().is_empty() {
+            // Within a menu the panel let through (the space menu): only keys towards a picker or
+            // a prompt go on.
+            let mut sequence = keymaps.pending().to_vec();
+            sequence.push(key);
+            if leads_to_ui(keymaps, mode, &sequence) {
+                return None;
+            }
+            // `esc` cancels the pending keys, the same way the keymap does.
+            keymaps.get(mode, key!(Esc));
+            cx.editor.autoinfo = None;
+            if key != key!(Esc) {
+                cx.editor.set_status(
+                    "Only pickers and prompts open from the explorer, esc goes back to the editor",
+                );
+            }
+            return Some(KeyResult::Handled);
+        }
         if let Some(path) = self.confirm_delete.take() {
             if key == key!('y') {
                 if let Err(err) = self.delete(&path, cx.editor) {
@@ -363,7 +397,7 @@ impl Explorer {
             key!('?') => cx.editor.set_status(HELP),
             key!(Esc) => self.unfocus(),
             key!('q') => return Some(KeyResult::Close),
-            _ if mode != Mode::Insert && leads_to_keymap(keymaps, mode, key) => return None,
+            _ if mode != Mode::Insert && leads_to_ui(keymaps, mode, &[key]) => return None,
             _ => {}
         }
         Some(KeyResult::Handled)
@@ -501,7 +535,14 @@ impl Explorer {
             && (self.area.top()..self.area.bottom()).contains(&row)
     }
 
-    pub fn handle_mouse(&mut self, event: &MouseEvent, editor: &mut Editor) {
+    pub fn handle_mouse(&mut self, event: &MouseEvent, cx: &mut commands::Context) {
+        if !self.focused && matches!(event.kind, MouseEventKind::Down(_)) {
+            // The panel takes the keys from here, insert mode would have none left to leave it.
+            if cx.editor.mode() == Mode::Insert {
+                commands::MappableCommand::normal_mode.execute(cx);
+            }
+        }
+        let editor = &mut *cx.editor;
         if self.confirm_delete.take().is_some() {
             editor.set_status("Delete cancelled");
         }
@@ -535,14 +576,6 @@ impl Explorer {
     }
 
     pub fn render(&mut self, area: Rect, surface: &mut Surface, editor: &Editor) {
-        // Runs after every event, wherever it went (a picker, a command, a job).
-        self.check_focus_target(editor);
-        if self.hiding != self.hide_ignored(editor) {
-            self.refresh(editor);
-        }
-        if editor.config().explorer.auto_reveal {
-            self.follow(doc!(editor).path());
-        }
         self.area = area;
         let theme = &editor.theme;
         surface.clear_with(
@@ -658,6 +691,11 @@ impl Explorer {
     }
 }
 
+fn focus_target(editor: &Editor) -> (ViewId, DocumentId, Selection) {
+    let (view, doc) = current_ref!(editor);
+    (view.id, doc.id(), doc.selection(view.id).clone())
+}
+
 /// `space E`: opens and focuses the panel, focuses it when open but not focused, or closes it.
 pub fn toggle(editor_view: &mut EditorView, editor: &Editor) {
     match &mut editor_view.explorer {
@@ -770,27 +808,43 @@ fn same_entry(old: &Path, new: &Path) -> bool {
         .any(|entry| entry.file_name() == new_name)
 }
 
-/// Whether `key` leads out of the panel: to the menu holding `toggle_explorer` or `file_picker`
-/// (the space menu, wherever it is mapped), to the command line, or to `toggle_explorer` itself.
-fn leads_to_keymap(keymaps: &Keymaps, mode: Mode, key: KeyEvent) -> bool {
+/// Whether the key `sequence` leads out of the panel: to a command that opens a picker or a prompt,
+/// or to a menu holding one (the space menu, wherever it is mapped).
+fn leads_to_ui(keymaps: &Keymaps, mode: Mode, sequence: &[KeyEvent]) -> bool {
     let keymap = keymaps.map();
-    match keymap.get(&mode).and_then(|trie| trie.search(&[key])) {
-        Some(KeyTrie::Node(node)) => {
-            holds_command(node, "toggle_explorer") || holds_command(node, "file_picker")
+    match keymap.get(&mode).and_then(|trie| trie.search(sequence)) {
+        Some(KeyTrie::Node(node)) => holds_ui(node),
+        Some(KeyTrie::MappableCommand(command)) => opens_ui(command.name()),
+        Some(KeyTrie::Sequence(commands)) => {
+            commands.iter().all(|command| opens_ui(command.name()))
         }
-        Some(KeyTrie::MappableCommand(command)) => {
-            matches!(command.name(), "command_mode" | "toggle_explorer")
-        }
-        _ => false,
+        None => false,
     }
 }
 
-fn holds_command(node: &KeyTrieNode, name: &str) -> bool {
+fn holds_ui(node: &KeyTrieNode) -> bool {
     node.values().any(|trie| match trie {
-        KeyTrie::MappableCommand(command) => command.name() == name,
-        KeyTrie::Sequence(commands) => commands.iter().any(|command| command.name() == name),
-        KeyTrie::Node(node) => holds_command(node, name),
+        KeyTrie::MappableCommand(command) => opens_ui(command.name()),
+        KeyTrie::Sequence(commands) => commands.iter().all(|command| opens_ui(command.name())),
+        KeyTrie::Node(node) => holds_ui(node),
     })
+}
+
+/// Commands that open a picker, a prompt or a panel, which act on the buffer only through what the
+/// user picks there. The others (paste, comment, rename symbol...) would edit the buffer hidden
+/// behind the panel.
+fn opens_ui(name: &str) -> bool {
+    name.ends_with("_picker")
+        || name.starts_with("file_explorer")
+        || matches!(
+            name,
+            "command_mode"
+                | "command_palette"
+                | "global_search"
+                | "toggle_explorer"
+                | "claude_code"
+                | "git_diff_view"
+        )
 }
 
 type Listings = HashMap<PathBuf, Listing>;
@@ -1014,14 +1068,35 @@ mod tests {
     }
 
     #[test]
-    fn space_menu_and_command_line_lead_to_the_keymap() {
+    fn pickers_and_the_command_line_lead_to_the_keymap() {
         let keymaps = Keymaps::default();
-        for key in [key!(' '), key!(':')] {
-            assert!(leads_to_keymap(&keymaps, Mode::Normal, key));
+        let leads = |sequence: &[KeyEvent]| leads_to_ui(&keymaps, Mode::Normal, sequence);
+        for sequence in [
+            &[key!(' ')][..],
+            &[key!(':')],
+            &[key!(' '), key!('f')],
+            &[key!(' '), key!('E')],
+            &[key!(' '), key!('s')],
+            &[key!(' '), key!('/')],
+            &[key!(' '), key!('?')],
+        ] {
+            assert!(leads(sequence), "{sequence:?}");
         }
         // Other menus and commands would act on the buffer behind the panel.
-        for key in [key!('m'), key!('z'), key!('i'), key!('u'), ctrl!('w')] {
-            assert!(!leads_to_keymap(&keymaps, Mode::Normal, key));
+        for sequence in [
+            &[key!('m')][..],
+            &[key!('z')],
+            &[key!('i')],
+            &[key!('u')],
+            &[ctrl!('w')],
+            &[key!(' '), key!('p')],
+            &[key!(' '), key!('R')],
+            &[key!(' '), key!('c')],
+            &[key!(' '), key!('w')],
+            &[key!(' '), key!('G')],
+            &[key!(' '), key!('x')],
+        ] {
+            assert!(!leads(sequence), "{sequence:?}");
         }
     }
 
@@ -1032,8 +1107,8 @@ mod tests {
         let space = normal.shift_remove(&key!(' ')).unwrap();
         normal.insert(key!(','), space);
         let keymaps = Keymaps::new(Box::new(arc_swap::ArcSwap::from_pointee(keymap)));
-        assert!(leads_to_keymap(&keymaps, Mode::Normal, key!(',')));
-        assert!(!leads_to_keymap(&keymaps, Mode::Normal, key!(' ')));
+        assert!(leads_to_ui(&keymaps, Mode::Normal, &[key!(',')]));
+        assert!(!leads_to_ui(&keymaps, Mode::Normal, &[key!(' ')]));
     }
 
     #[test]
@@ -1080,9 +1155,15 @@ mod tests {
         let mut explorer = Explorer::empty(PathBuf::from("/project"));
         explorer.cut = Some(PathBuf::from("/project/src/main.rs"));
         explorer.moved(Path::new("/project/lib"), Path::new("/project/core"));
-        assert_eq!(explorer.cut.as_deref(), Some(Path::new("/project/src/main.rs")));
+        assert_eq!(
+            explorer.cut.as_deref(),
+            Some(Path::new("/project/src/main.rs"))
+        );
         explorer.moved(Path::new("/project/src"), Path::new("/project/app"));
-        assert_eq!(explorer.cut.as_deref(), Some(Path::new("/project/app/main.rs")));
+        assert_eq!(
+            explorer.cut.as_deref(),
+            Some(Path::new("/project/app/main.rs"))
+        );
     }
 
     #[test]

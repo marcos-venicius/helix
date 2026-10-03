@@ -1504,10 +1504,8 @@ impl Component for EditorView {
                 let mode = cx.editor.mode();
 
                 let explorer_key = match &mut self.explorer {
-                    Some(explorer)
-                        if self.keymaps.pending().is_empty() && self.on_next_key.is_none() =>
-                    {
-                        explorer.handle_key(key, mode, &self.keymaps, &mut cx)
+                    Some(explorer) if self.on_next_key.is_none() => {
+                        explorer.handle_key(key, mode, &mut self.keymaps, &mut cx)
                     }
                     _ => None,
                 };
@@ -1622,7 +1620,7 @@ impl Component for EditorView {
                         self.handle_non_key_input(&mut cx);
                     }
                     if let Some(explorer) = &mut self.explorer {
-                        explorer.handle_mouse(event, cx.editor);
+                        explorer.handle_mouse(event, &mut cx);
                     }
                     return EventResult::Consumed(None);
                 }
@@ -1689,6 +1687,9 @@ impl Component for EditorView {
             Self::render_bufferline(cx.editor, area.with_height(1), surface);
         }
 
+        if let Some(explorer) = &mut self.explorer {
+            explorer.update(cx.editor);
+        }
         let explorer_focused = self.explorer.as_ref().is_some_and(Explorer::is_focused);
         for (view, is_focused) in cx.editor.tree.views() {
             let doc = cx.editor.document(view.doc).unwrap();
