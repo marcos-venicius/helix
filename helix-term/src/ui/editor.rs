@@ -7,7 +7,7 @@ use crate::{
     keymap::{KeymapResult, Keymaps},
     ui::{
         document::{render_document, LinePos, TextRenderer},
-        explorer::Explorer,
+        explorer::{Explorer, KeyResult as ExplorerKey},
         statusline,
         text_decorations::{self, Decoration, DecorationManager, InlineDiagnostics},
         Completion, ProgressSpinners,
@@ -1503,15 +1503,16 @@ impl Component for EditorView {
 
                 let mode = cx.editor.mode();
 
-                let explorer_takes_key = self.keymaps.pending().is_empty()
-                    && self.on_next_key.is_none()
-                    && self
-                        .explorer
-                        .as_ref()
-                        .is_some_and(|explorer| explorer.takes_key(key, mode));
-                if explorer_takes_key {
-                    let explorer = self.explorer.as_mut().unwrap();
-                    if !explorer.handle_key(key, &mut cx) {
+                let explorer_key = match &mut self.explorer {
+                    Some(explorer)
+                        if self.keymaps.pending().is_empty() && self.on_next_key.is_none() =>
+                    {
+                        explorer.handle_key(key, mode, &self.keymaps, &mut cx)
+                    }
+                    _ => None,
+                };
+                if let Some(result) = explorer_key {
+                    if matches!(result, ExplorerKey::Close) {
                         self.explorer = None;
                     }
                 } else if !self.on_next_key(OnKeyCallbackKind::PseudoPending, &mut cx, key) {
