@@ -58,8 +58,17 @@ pub struct Explorer {
 
 impl Explorer {
     pub fn new(editor: &Editor) -> Self {
-        let mut explorer = Self {
-            root: helix_stdx::env::current_working_dir(),
+        let mut explorer = Self::empty(helix_stdx::env::current_working_dir());
+        explorer.refresh(editor);
+        if let Some(path) = doc!(editor).path().map(Path::to_path_buf) {
+            explorer.reveal(&path);
+        }
+        explorer
+    }
+
+    fn empty(root: PathBuf) -> Self {
+        Self {
+            root,
             nodes: Vec::new(),
             expanded: HashSet::new(),
             cursor: 0,
@@ -71,12 +80,7 @@ impl Explorer {
             flip_hidden: false,
             hiding: false,
             confirm_delete: None,
-        };
-        explorer.refresh(editor);
-        if let Some(path) = doc!(editor).path().map(Path::to_path_buf) {
-            explorer.reveal(&path);
         }
-        explorer
     }
 
     pub fn is_focused(&self) -> bool {
@@ -100,9 +104,14 @@ impl Explorer {
     }
 
     /// Whether the panel wants `key` instead of the editor keymap. Space and `:` still reach the
-    /// keymap, so `space E`, the pickers and commands keep working with the panel focused.
+    /// keymap, so `space E`, the pickers and commands keep working with the panel focused. While a
+    /// deletion waits for its confirmation every key comes here, so that only the very next key
+    /// can confirm it.
     pub fn takes_key(&self, key: KeyEvent, mode: Mode) -> bool {
-        self.focused && (mode == Mode::Insert || (key != key!(' ') && key != key!(':')))
+        self.focused
+            && (self.confirm_delete.is_some()
+                || mode == Mode::Insert
+                || (key != key!(' ') && key != key!(':')))
     }
 
     fn hide_ignored(&self, editor: &Editor) -> bool {
@@ -391,6 +400,9 @@ impl Explorer {
     }
 
     pub fn handle_mouse(&mut self, event: &MouseEvent, editor: &mut Editor) {
+        if self.confirm_delete.take().is_some() {
+            editor.set_status("Delete cancelled");
+        }
         match event.kind {
             MouseEventKind::ScrollDown => self.move_cursor(3),
             MouseEventKind::ScrollUp => self.move_cursor(-3),
@@ -706,6 +718,18 @@ mod tests {
             .map(|(name, ignored)| (name.to_string(), *ignored))
             .collect();
         assert_eq!(names(&tree), expected);
+    }
+
+    #[test]
+    fn pending_delete_takes_every_key() {
+        let mut explorer = Explorer::empty(PathBuf::from("/project"));
+        assert!(!explorer.takes_key(key!(' '), Mode::Normal));
+        assert!(!explorer.takes_key(key!(':'), Mode::Normal));
+        explorer.confirm_delete = Some(PathBuf::from("/project/src"));
+        assert!(explorer.takes_key(key!(' '), Mode::Normal));
+        assert!(explorer.takes_key(key!(':'), Mode::Normal));
+        explorer.unfocus();
+        assert!(explorer.confirm_delete.is_none());
     }
 
     #[test]
