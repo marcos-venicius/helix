@@ -13,6 +13,7 @@ code lives:
 | --- | --- |
 | Claude Code popup | `helix-term/src/ui/claude.rs`, `helix-term/src/commands/claude.rs` |
 | Side by side git diff | `helix-term/src/ui/diff_view.rs`, `helix-term/src/commands/diff_view.rs` |
+| Staged files in the changed files picker | `status()` and its helpers in `helix-vcs/src/git.rs`, `FileChange::Added` in `helix-vcs/src/status.rs` |
 
 ## Branches
 
@@ -75,6 +76,10 @@ the same spots:
 - `helix-term/src/ui/picker.rs`: we add a generic `with_key_handler` (a `key_handlers` field, its
   builder and a check at the top of the key match in `handle_event`). Keep upstream's version and
   re-add those pieces; `changed_file_picker` in `helix-term/src/commands.rs` uses it for `C-g`.
+- `helix-vcs/src/git.rs`: `status()` is rewritten to also list staged changes (`into_iter` instead of
+  `into_index_worktree_iter`, merging both kinds of change per file), and `FileChange` has an extra
+  `Added` variant. If upstream changes `status()`, port their change onto our version and run
+  `cargo test -p helix-vcs --features git`, which covers the staged cases.
 - `Cargo.lock`: take upstream's version, then run `cargo build` to add our dependencies back
   (`alacritty_terminal`, `imara-diff` in `helix-term`).
 - `book/src/generated/*.md`: don't resolve by hand; take either side and run `cargo xtask docgen`.

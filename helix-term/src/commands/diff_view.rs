@@ -28,7 +28,7 @@ pub(crate) fn open(
     let base = editor.diff_providers.get_diff_base(base_path, trust_full);
     let left_title = match &base {
         Some(_) => format!("HEAD: {}", relative(base_path)),
-        None => "HEAD: (not tracked)".to_string(),
+        None => "HEAD: (new file)".to_string(),
     };
     let base = String::from_utf8(base.unwrap_or_default())
         .map_err(|_| anyhow::anyhow!("{} is a binary file", relative(base_path)))?;

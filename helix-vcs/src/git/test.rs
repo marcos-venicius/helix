@@ -156,3 +156,125 @@ fn symlink_to_git_repo() {
     assert_eq!(git::get_diff_base(&file_link, true).unwrap(), contents);
     assert_eq!(git::get_diff_base(&file, true).unwrap(), contents);
 }
+
+/// The changed files of `repo`, as `(kind, path relative to the repo)`, sorted by path.
+fn changed_files(repo: &Path) -> Vec<(&'static str, String)> {
+    use crate::FileChange;
+    use std::sync::Mutex;
+
+    let changes = Mutex::new(Vec::new());
+    git::for_each_changed_file(repo, true, |change| {
+        let relative = |path: &Path| {
+            let repo = repo.canonicalize().unwrap();
+            path.canonicalize()
+                .unwrap_or_else(|_| path.to_path_buf())
+                .strip_prefix(&repo)
+                .unwrap_or(path)
+                .display()
+                .to_string()
+        };
+        let entry = match change.unwrap() {
+            FileChange::Untracked { path } => ("untracked", relative(&path)),
+            FileChange::Added { path } => ("added", relative(&path)),
+            FileChange::Modified { path } => ("modified", relative(&path)),
+            FileChange::Conflict { path } => ("conflict", relative(&path)),
+            FileChange::Deleted { path } => (
+                "deleted",
+                path.file_name().unwrap().to_string_lossy().into(),
+            ),
+            FileChange::Renamed { from_path, to_path } => (
+                "renamed",
+                format!(
+                    "{} -> {}",
+                    from_path.file_name().unwrap().to_string_lossy(),
+                    relative(&to_path)
+                ),
+            ),
+        };
+        changes.lock().unwrap().push(entry);
+        true
+    })
+    .unwrap();
+    let mut changes = changes.into_inner().unwrap();
+    changes.sort_by(|a, b| a.1.cmp(&b.1));
+    changes
+}
+
+fn write(repo: &Path, file: &str, contents: &str) {
+    File::create(repo.join(file))
+        .unwrap()
+        .write_all(contents.as_bytes())
+        .unwrap();
+}
+
+/// A repository with `a.txt` and `b.txt` committed.
+fn committed_repo() -> TempDir {
+    let temp_git = empty_git_repo();
+    write(temp_git.path(), "a.txt", "a\n");
+    write(temp_git.path(), "b.txt", "b\nb\nb\nb\n");
+    create_commit(temp_git.path(), true);
+    temp_git
+}
+
+#[test]
+fn status_lists_unstaged_changes() {
+    let temp_git = committed_repo();
+    let repo = temp_git.path();
+    write(repo, "a.txt", "changed\n");
+    write(repo, "new.txt", "new\n");
+    assert_eq!(
+        changed_files(repo),
+        [
+            ("modified", "a.txt".into()),
+            ("untracked", "new.txt".into())
+        ]
+    );
+}
+
+#[test]
+fn status_lists_staged_changes() {
+    let temp_git = committed_repo();
+    let repo = temp_git.path();
+    write(repo, "a.txt", "changed\n");
+    write(repo, "new.txt", "new\n");
+    exec_git_cmd("add -A", repo);
+    exec_git_cmd("rm -q b.txt", repo);
+    assert_eq!(
+        changed_files(repo),
+        [
+            ("modified", "a.txt".into()),
+            ("deleted", "b.txt".into()),
+            ("added", "new.txt".into()),
+        ]
+    );
+}
+
+#[test]
+fn status_merges_staged_and_unstaged_changes() {
+    let temp_git = committed_repo();
+    let repo = temp_git.path();
+    // staged, then changed again: listed once
+    write(repo, "a.txt", "staged\n");
+    exec_git_cmd("add a.txt", repo);
+    write(repo, "a.txt", "staged and changed again\n");
+    // added, then changed again: still new compared to HEAD
+    write(repo, "new.txt", "new\n");
+    exec_git_cmd("add new.txt", repo);
+    write(repo, "new.txt", "new, changed\n");
+    // added, then deleted: not in HEAD either
+    write(repo, "gone.txt", "gone\n");
+    exec_git_cmd("add gone.txt", repo);
+    std::fs::remove_file(repo.join("gone.txt")).unwrap();
+    assert_eq!(
+        changed_files(repo),
+        [("modified", "a.txt".into()), ("added", "new.txt".into())]
+    );
+}
+
+#[test]
+fn status_lists_staged_renames() {
+    let temp_git = committed_repo();
+    let repo = temp_git.path();
+    exec_git_cmd("mv b.txt c.txt", repo);
+    assert_eq!(changed_files(repo), [("renamed", "b.txt -> c.txt".into())]);
+}

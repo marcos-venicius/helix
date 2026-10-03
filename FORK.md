@@ -7,6 +7,7 @@ as in the [Helix documentation](https://docs.helix-editor.com/).
 
 - [Claude Code popup](#claude-code-popup)
 - [Side by side git diff](#side-by-side-git-diff)
+- [Staged files in the changed files picker](#staged-files-in-the-changed-files-picker)
 
 To build and install the fork, from the `marcos` branch:
 
@@ -92,9 +93,9 @@ Inside the diff:
 | `Enter` | Close the diff and open the file at the current hunk |
 | `q`, `Esc` | Close |
 
-The footer shows the current hunk (e.g. `hunk 2/5`), and its line numbers are bold. Untracked files
-only have a right side, and deleted files only have a left side. Renamed files are compared with
-their old path in HEAD.
+The footer shows the current hunk (e.g. `hunk 2/5`), and its line numbers are bold. New files
+(untracked or staged) only have a right side, and deleted files only have a left side. Renamed files
+are compared with their old path in HEAD.
 
 ### Limitations
 
@@ -108,3 +109,14 @@ their old path in HEAD.
 - Search inside the diff.
 - Fold long runs of unchanged lines.
 - Stage or revert a hunk from the diff.
+
+## Staged files in the changed files picker
+
+Upstream's changed files picker (`space g`) only lists unstaged changes, so files disappear from it
+as soon as they are `git add`ed. In this fork it lists every change compared to HEAD, like
+`git status`, staged or not:
+
+- new files that are staged are listed as `+ added` (unstaged ones stay `+ untracked`);
+- staged renames (`git mv`) are listed as renamed;
+- a file that is staged and then changed again is listed once;
+- a file that is added and then deleted from disk is not listed, since it matches HEAD again.
