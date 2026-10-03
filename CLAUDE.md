@@ -72,6 +72,8 @@ Our features keep upstream files mostly untouched: the logic lives in new files 
 [Fork features](#fork-features)), and upstream files only get small hooks. When upstream touches
 the same spots:
 
+- `jump_view_left` in `helix-term/src/commands.rs` first calls `ui::explorer::jump_left`, which
+  focuses the explorer from the leftmost view. Keep upstream's version and re-add that check.
 - `helix-term/src/keymap/default.rs`, the `static_commands!` list in `helix-term/src/commands.rs`,
   `TYPABLE_COMMAND_LIST` in `helix-term/src/commands/typed.rs`: usually keep both sides.
 - `helix-term/src/ui/picker.rs`: we add a generic `with_key_handler` (a `key_handlers` field, its

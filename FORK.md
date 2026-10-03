@@ -152,12 +152,13 @@ Not to be confused with upstream's `space e`, which opens the file explorer pick
 | `R` | Read the whole tree from disk again. |
 | `H` | Show/hide git ignored files for this session. |
 | `?` | Show the keys in the status line. |
-| `Esc` | Give the focus back to the editor. |
+| `Esc`, `C-w l` | Give the focus back to the editor. From the leftmost view, `C-w h` focuses the panel again. |
 | `q` | Close the panel. |
 
 Keys that lead to a picker or a prompt keep working while the panel is focused: `:`, and in the
 space menu (wherever it is mapped) the pickers, `space E`, global search, the command palette, the
-Claude Code popup and the git diff view. Other keys the panel doesn't use are ignored, and other
+Claude Code popup and the git diff view. `jump_view_right` (`C-w l`, `space w l`) goes back to the
+editor. Other keys the panel doesn't use are ignored, and other
 space menu entries (`space p`, `space c`, `space w`, ...) cancel the menu, so they can't edit the
 buffer behind the panel. Terminal pastes are ignored too. A sticky menu entered before focusing the
 panel keeps its keys until `Esc`. Clicking the panel in insert mode goes back to normal mode.

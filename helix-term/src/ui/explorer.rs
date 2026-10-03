@@ -372,13 +372,16 @@ impl Explorer {
             // a prompt go on.
             let mut sequence = keymaps.pending().to_vec();
             sequence.push(key);
-            if leads_to_ui(keymaps, mode, &sequence) {
+            let route = route(keymaps, mode, &sequence);
+            if route == Route::Keymap {
                 return None;
             }
             // `esc` cancels the pending keys, the same way the keymap does.
             keymaps.get(mode, key!(Esc));
             cx.editor.autoinfo = None;
-            if key != key!(Esc) {
+            if route == Route::Editor {
+                self.unfocus();
+            } else if key != key!(Esc) {
                 cx.editor.set_status(
                     "Only pickers and prompts open from the explorer, esc goes back to the editor",
                 );
@@ -441,7 +444,11 @@ impl Explorer {
             key!('?') => cx.editor.set_status(HELP),
             key!(Esc) => self.unfocus(),
             key!('q') => return Some(KeyResult::Close),
-            _ if mode != Mode::Insert && leads_to_ui(keymaps, mode, &[key]) => return None,
+            _ if mode != Mode::Insert => match route(keymaps, mode, &[key]) {
+                Route::Keymap => return None,
+                Route::Editor => self.unfocus(),
+                Route::Panel => {}
+            },
             _ => {}
         }
         Some(KeyResult::Handled)
@@ -740,6 +747,27 @@ fn focus_target(editor: &Editor) -> (ViewId, DocumentId, Selection) {
     (view.id, doc.id(), doc.selection(view.id).clone())
 }
 
+/// `jump_view_left` (`C-w h`) from the leftmost view goes to the panel, when it is open. Returns
+/// whether there was no view to the left.
+pub fn jump_left(cx: &mut commands::Context) -> bool {
+    let tree = &cx.editor.tree;
+    if tree
+        .find_split_in_direction(tree.focus, helix_view::tree::Direction::Left)
+        .is_some()
+    {
+        return false;
+    }
+    cx.callback.push(Box::new(|compositor, cx| {
+        let explorer = compositor
+            .find::<EditorView>()
+            .and_then(|view| view.explorer.as_mut());
+        if let Some(explorer) = explorer {
+            explorer.focus(cx.editor);
+        }
+    }));
+    true
+}
+
 /// `space E`: opens and focuses the panel, focuses it when open but not focused, or closes it.
 pub fn toggle(editor_view: &mut EditorView, editor: &Editor) {
     match &mut editor_view.explorer {
@@ -852,25 +880,43 @@ fn same_entry(old: &Path, new: &Path) -> bool {
         .any(|entry| entry.file_name() == new_name)
 }
 
-/// Whether the key `sequence` leads out of the panel: to a command that opens a picker or a prompt,
-/// or to a menu holding one (the space menu, wherever it is mapped).
-fn leads_to_ui(keymaps: &Keymaps, mode: Mode, sequence: &[KeyEvent]) -> bool {
+/// Where a key sequence typed in the focused panel goes.
+#[derive(Debug, PartialEq, Eq)]
+enum Route {
+    /// Nowhere else: the panel's own key, or a sequence it cancels.
+    Panel,
+    /// To the keymap: a command that opens a picker or a prompt, or a menu holding one (the space
+    /// menu, wherever it is mapped).
+    Keymap,
+    /// Back to the editor: `jump_view_right` (`C-w l`), since the editor is right of the panel.
+    Editor,
+}
+
+fn route(keymaps: &Keymaps, mode: Mode, sequence: &[KeyEvent]) -> Route {
     let keymap = keymaps.map();
     match keymap.get(&mode).and_then(|trie| trie.search(sequence)) {
-        Some(KeyTrie::Node(node)) => holds_ui(node),
-        Some(KeyTrie::MappableCommand(command)) => opens_ui(command.name()),
-        Some(KeyTrie::Sequence(commands)) => {
-            commands.iter().all(|command| opens_ui(command.name()))
+        Some(KeyTrie::Node(node)) if holds(node) => Route::Keymap,
+        Some(KeyTrie::MappableCommand(command)) if opens_ui(command.name()) => Route::Keymap,
+        Some(KeyTrie::MappableCommand(command)) if command.name() == JUMP_RIGHT => Route::Editor,
+        Some(KeyTrie::Sequence(commands))
+            if commands.iter().all(|command| opens_ui(command.name())) =>
+        {
+            Route::Keymap
         }
-        None => false,
+        _ => Route::Panel,
     }
 }
 
-fn holds_ui(node: &KeyTrieNode) -> bool {
+const JUMP_RIGHT: &str = "jump_view_right";
+
+/// Whether the menu `node` holds a command the panel lets through.
+fn holds(node: &KeyTrieNode) -> bool {
     node.values().any(|trie| match trie {
-        KeyTrie::MappableCommand(command) => opens_ui(command.name()),
+        KeyTrie::MappableCommand(command) => {
+            opens_ui(command.name()) || command.name() == JUMP_RIGHT
+        }
         KeyTrie::Sequence(commands) => commands.iter().all(|command| opens_ui(command.name())),
-        KeyTrie::Node(node) => holds_ui(node),
+        KeyTrie::Node(node) => holds(node),
     })
 }
 
@@ -1269,9 +1315,13 @@ mod tests {
     #[test]
     fn pickers_and_the_command_line_lead_to_the_keymap() {
         let keymaps = Keymaps::default();
-        let leads = |sequence: &[KeyEvent]| leads_to_ui(&keymaps, Mode::Normal, sequence);
+        let route = |sequence: &[KeyEvent]| route(&keymaps, Mode::Normal, sequence);
+        let leads = |sequence: &[KeyEvent]| route(sequence) == Route::Keymap;
         for sequence in [
-            &[key!(' ')][..],
+            // Window menus, for `l` back to the editor.
+            &[ctrl!('w')][..],
+            &[key!(' '), key!('w')],
+            &[key!(' ')],
             &[key!(':')],
             &[key!(' '), key!('f')],
             &[key!(' '), key!('E')],
@@ -1287,15 +1337,24 @@ mod tests {
             &[key!('z')],
             &[key!('i')],
             &[key!('u')],
-            &[ctrl!('w')],
             &[key!(' '), key!('p')],
             &[key!(' '), key!('R')],
             &[key!(' '), key!('c')],
-            &[key!(' '), key!('w')],
             &[key!(' '), key!('G')],
             &[key!(' '), key!('x')],
+            &[ctrl!('w'), key!('v')],
+            &[ctrl!('w'), key!('h')],
+            &[key!(' '), key!('w'), key!('q')],
         ] {
-            assert!(!leads(sequence), "{sequence:?}");
+            assert_eq!(route(sequence), Route::Panel, "{sequence:?}");
+        }
+        for sequence in [
+            &[ctrl!('w'), key!('l')][..],
+            &[ctrl!('w'), ctrl!('l')],
+            &[ctrl!('w'), key!(Right)],
+            &[key!(' '), key!('w'), key!('l')],
+        ] {
+            assert_eq!(route(sequence), Route::Editor, "{sequence:?}");
         }
     }
 
@@ -1306,8 +1365,8 @@ mod tests {
         let space = normal.shift_remove(&key!(' ')).unwrap();
         normal.insert(key!(','), space);
         let keymaps = Keymaps::new(Box::new(arc_swap::ArcSwap::from_pointee(keymap)));
-        assert!(leads_to_ui(&keymaps, Mode::Normal, &[key!(',')]));
-        assert!(!leads_to_ui(&keymaps, Mode::Normal, &[key!(' ')]));
+        assert_eq!(route(&keymaps, Mode::Normal, &[key!(',')]), Route::Keymap);
+        assert_eq!(route(&keymaps, Mode::Normal, &[key!(' ')]), Route::Panel);
     }
 
     #[test]
