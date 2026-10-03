@@ -380,16 +380,18 @@ impl Explorer {
         {
             bail!("{} has unsaved changes", doc.display_name());
         }
-        for id in documents {
-            if editor.close_document(id, true).is_err() {
-                bail!("couldn't close the buffer of a deleted file");
-            }
-        }
+        // Delete first: if that fails, the buffers stay open.
         editor.delete_path(path, true)?;
         if self.cut.as_ref().is_some_and(|cut| cut.starts_with(path)) {
             self.cut = None;
         }
         self.refresh(editor);
+        let closed = documents.into_iter().fold(true, |closed, id| {
+            editor.close_document(id, true).is_ok() && closed
+        });
+        if !closed {
+            bail!("deleted, but couldn't close its buffers");
+        }
         editor.set_status(format!("Deleted {}", self.relative(path)));
         Ok(())
     }
