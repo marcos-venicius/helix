@@ -367,7 +367,7 @@ impl Component for ClaudeTerminal {
     fn render(&mut self, viewport: Rect, surface: &mut Surface, cx: &mut Context) {
         let area = popup_area(viewport);
         let theme = &cx.editor.theme;
-        let background = theme.get("ui.popup");
+        let background = theme.get("ui.background");
         surface.clear_with(area, background);
 
         let title = self.session.title();
@@ -483,7 +483,7 @@ fn cell_style(fg: TermColor, bg: TermColor, flags: Flags, background: Style) -> 
     let (fg, dim) = convert_color(fg);
     let (bg, _) = convert_color(bg);
     let mut style = Style::default().fg(fg);
-    // Default background blends with the popup instead of the terminal's own background.
+    // Default background blends with the editor instead of the terminal's own background.
     style = match bg {
         Color::Reset => style.bg(background.bg.unwrap_or(Color::Reset)),
         bg => style.bg(bg),
