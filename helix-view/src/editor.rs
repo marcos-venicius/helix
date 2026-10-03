@@ -273,6 +273,8 @@ pub struct ExplorerConfig {
     pub width: u16,
     /// Hide files and directories ignored by git instead of dimming them. Defaults to false.
     pub hide_gitignored: bool,
+    /// Show file type icons, which need a Nerd Font. Defaults to true.
+    pub icons: bool,
 }
 
 impl Default for ExplorerConfig {
@@ -280,6 +282,7 @@ impl Default for ExplorerConfig {
         Self {
             width: 30,
             hide_gitignored: false,
+            icons: true,
         }
     }
 }

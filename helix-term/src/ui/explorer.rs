@@ -27,6 +27,8 @@ use crate::keymap::{KeyTrie, KeyTrieNode, Keymaps};
 use crate::ui::{self, EditorView, PromptEvent};
 use crate::{ctrl, key};
 
+mod icons;
+
 const HELP: &str = "a: new (end with / for a directory)  r: rename  x: cut  p: paste  d: delete  \
                     R: refresh  H: show/hide git ignored  q: close  esc: back to the editor";
 
@@ -579,6 +581,7 @@ impl Explorer {
         }
 
         let current = doc!(editor).path();
+        let show_icons = editor.config().explorer.icons;
         for (index, node) in self.nodes.iter().enumerate().skip(self.scroll).take(height) {
             let y = body.y + (index - self.scroll) as u16;
             if index == self.cursor {
@@ -594,14 +597,30 @@ impl Explorer {
             if self.cut.as_ref() == Some(&node.path) {
                 style = style.add_modifier(Modifier::ITALIC);
             }
-            let icon = match (node.is_dir, self.expanded.contains(&node.path)) {
+            let expanded = self.expanded.contains(&node.path);
+            let chevron = match (node.is_dir, expanded) {
                 (true, true) => "▾ ",
                 (true, false) => "▸ ",
                 (false, _) => "  ",
             };
+            let indent = format!(" {}{chevron}", "  ".repeat(node.depth));
+            let (mut x, _) = surface.set_stringn(body.x, y, &indent, body.width as usize, style);
+            if show_icons {
+                let (glyph, color) = if node.is_dir {
+                    icons::directory(expanded)
+                } else {
+                    icons::file(&node.name)
+                };
+                let mut icon_style = Style::default().fg(color);
+                if node.ignored {
+                    icon_style = icon_style.patch(ignored);
+                }
+                let width = body.right().saturating_sub(x) as usize;
+                (x, _) = surface.set_stringn(x, y, &format!("{glyph} "), width, icon_style);
+            }
             let slash = if node.is_dir { "/" } else { "" };
-            let line = format!(" {}{icon}{}{slash}", "  ".repeat(node.depth), node.name);
-            surface.set_stringn(body.x, y, &line, body.width as usize, style);
+            let width = body.right().saturating_sub(x) as usize;
+            surface.set_stringn(x, y, &format!("{}{slash}", node.name), width, style);
         }
     }
 }
