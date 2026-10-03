@@ -2658,7 +2658,18 @@ fn claude(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyho
         return Ok(());
     }
 
-    super::claude::claude_request(cx.editor, Some(args.join(" ")))
+    let prompt = args.join(" ");
+    cx.jobs.callback(async move {
+        let call = move |editor: &mut Editor, compositor: &mut Compositor| {
+            if prompt.trim().is_empty() {
+                super::claude::toggle(editor, compositor)
+            } else {
+                super::claude::start(editor, compositor, prompt)
+            }
+        };
+        Ok(Callback::EditorCompositor(Box::new(call)))
+    });
+    Ok(())
 }
 
 fn run_shell_command(
@@ -3989,7 +4000,7 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
     TypableCommand {
         name: "claude",
         aliases: &["ai"],
-        doc: "Open Claude Code with the current file, line and selection as context. Optional arguments are sent as the first message.",
+        doc: "Toggle the Claude Code popup. With arguments, start a new session with the current file, line and selection as context and send them as the first message.",
         fun: claude,
         completer: CommandCompleter::none(),
         signature: Signature {

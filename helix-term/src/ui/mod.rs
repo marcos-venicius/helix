@@ -1,3 +1,4 @@
+pub mod claude;
 mod completion;
 mod document;
 pub(crate) mod editor;

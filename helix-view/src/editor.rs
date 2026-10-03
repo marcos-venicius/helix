@@ -1270,15 +1270,6 @@ use futures_util::stream::{Flatten, Once};
 
 type Diagnostics = BTreeMap<Uri, Vec<(lsp::Diagnostic, DiagnosticProvider)>>;
 
-/// An external program that needs exclusive access to the terminal (e.g. a TUI).
-/// The application suspends the editor UI, runs it to completion and then redraws.
-#[derive(Debug, Clone)]
-pub struct InteractiveCommand {
-    pub program: String,
-    pub args: Vec<String>,
-    pub cwd: PathBuf,
-}
-
 pub struct Editor {
     /// Current editing mode.
     pub mode: Mode,
@@ -1291,8 +1282,6 @@ pub struct Editor {
     pub saves: HashMap<DocumentId, UnboundedSender<Once<DocumentSavedEventFuture>>>,
     pub save_queue: SelectAll<Flatten<UnboundedReceiverStream<Once<DocumentSavedEventFuture>>>>,
     pub write_count: usize,
-    /// Pending program to hand the terminal to, picked up by the application event loop.
-    pub interactive_command: Option<InteractiveCommand>,
 
     pub count: Option<std::num::NonZeroUsize>,
     pub selected_register: Option<char>,
@@ -1444,7 +1433,6 @@ impl Editor {
             saves: HashMap::new(),
             save_queue: SelectAll::new(),
             write_count: 0,
-            interactive_command: None,
             count: None,
             selected_register: None,
             macro_recording: None,
