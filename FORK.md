@@ -131,7 +131,8 @@ are shown dimmed instead of hidden. The `.git` directory is never listed.
 
 Entries have file type icons (Nerd Font glyphs, colored by type), and the file of the current buffer
 is shown in bold. While the panel isn't focused, it follows the current buffer: switching to another
-file (a picker, `:open`, `gd`, ...) expands the tree down to it and selects it.
+file (a picker, `:open`, `gd`, ...) expands the tree down to it and selects it, unless the file is
+inside a directory ignored by git (`target`, `node_modules`).
 
 Not to be confused with upstream's `space e`, which opens the file explorer picker.
 
@@ -145,7 +146,7 @@ Not to be confused with upstream's `space e`, which opens the file explorer pick
 | `h`, `Left` | Collapse a directory, or go to the parent directory. |
 | `Enter`, mouse click | Expand/collapse a directory, open a file. |
 | `a` | Create a file in the selected directory (or next to the selected file). Missing parent directories are created, and a name ending in `/` creates a directory. |
-| `r` | Rename. The new name may contain `/` to move the entry to a subdirectory. |
+| `r` | Rename. The new name may contain `/` to move the entry to a subdirectory. Changing only the case of a name works on case-insensitive filesystems too. |
 | `x`, then `p` | Cut the selected entry, then move it into the selected directory (or next to the selected file). |
 | `d`, then `y` | Delete the selected file or directory (directories are deleted recursively). Any other key or a click cancels. |
 | `R` | Read the whole tree from disk again. |
@@ -154,14 +155,16 @@ Not to be confused with upstream's `space e`, which opens the file explorer pick
 | `Esc` | Give the focus back to the editor. |
 | `q` | Close the panel. |
 
-The space menu (wherever it is mapped: the menu that holds `toggle_explorer` or `file_picker`) and
-`:` keep working while the panel is focused, so the pickers and commands are available. Other keys
-the panel doesn't use are ignored, so they can't edit the buffer behind it, and so are terminal
-pastes.
+Keys that lead to a picker or a prompt keep working while the panel is focused: `:`, and in the
+space menu (wherever it is mapped) the pickers, `space E`, global search, the command palette, the
+Claude Code popup and the git diff view. Other keys the panel doesn't use are ignored, and other
+space menu entries (`space p`, `space c`, `space w`, ...) cancel the menu, so they can't edit the
+buffer behind the panel. Terminal pastes are ignored too. A sticky menu entered before focusing the
+panel keeps its keys until `Esc`. Clicking the panel in insert mode goes back to normal mode.
 
-The panel gives the focus back to the editor as soon as the editor shows another view or buffer:
-opening a file from the panel, a picker or `:open`, or clicking in the editor. Opened files show in
-the current view.
+The panel gives the focus back to the editor as soon as the editor moves to another view, buffer or
+selection: opening a file from the panel, a picker or `:open`, a jump within the same file (symbol
+picker, `:42`), or clicking in the editor. Opened files show in the current view.
 
 Renames, moves, creations and deletions go through the same code as `:move`, so language servers
 are notified (`willRename`, `didCreate`, ...). Open buffers follow renamed and moved files,
@@ -169,8 +172,8 @@ including files inside a moved directory. Deleting a file closes its buffers, an
 refused when one of them has unsaved changes. Moves and renames never overwrite an existing file.
 
 The tree is updated from disk when the panel gets the focus and after each operation. Directory
-listings are kept: only the directories whose modification time changed (or their `.gitignore`'s,
-with everything below it) are read again. `R` reads everything again. When the working directory
+listings of the expanded directories are kept: only the directories whose modification time changed
+(or their `.gitignore`'s, with everything below it) are read again. `R` reads everything again. When the working directory
 changes (`:cd`), the tree follows it on the next update.
 
 ### Configuration
@@ -196,6 +199,8 @@ focused) and `ui.window` (separator).
   directory above the working directory, are only picked up by `R`.
 - One entry at a time: there is no multi-selection for moving or deleting several files.
 - Deleting is permanent, there is no trash.
+- Directories are read on the UI thread, so expanding a directory with a huge number of entries can
+  pause the editor briefly.
 - Copying files isn't supported, only moving.
 - Icons need a terminal font patched with [Nerd Fonts](https://www.nerdfonts.com/); without one
   they show as boxes, so set `icons = false`. Their colors are fixed, not taken from the theme, and

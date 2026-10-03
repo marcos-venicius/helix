@@ -78,9 +78,10 @@ the same spots:
   builder and a check at the top of the key match in `handle_event`). Keep upstream's version and
   re-add those pieces; `changed_file_picker` in `helix-term/src/commands.rs` uses it for `C-g`.
 - `helix-term/src/ui/editor.rs`: `EditorView` has an `explorer` field. `render` clips the
-  explorer's width off the editor area before `cx.editor.resize` and renders it after the views
-  (unfocusing them while the explorer has the focus). `handle_event` drops pastes while it's
-  focused, offers it each key first (`explorer_key`, before `on_next_key`) and hands it the mouse
+  explorer's width off the editor area before `cx.editor.resize`, calls `explorer.update` before
+  drawing the views (unfocusing them while the explorer has the focus) and renders it after them.
+  `handle_event` drops pastes while it's focused, offers it each key first (`explorer_key`, before
+  `on_next_key`, with `&mut self.keymaps` so it can cancel pending keys) and hands it the mouse
   events over its area (after `handle_non_key_input`). `cursor` hides the cursor while it's
   focused. Keep upstream's version and re-add those pieces.
 - `helix-vcs/src/git.rs`: `status()` is rewritten to also list staged changes (`into_iter` instead of
