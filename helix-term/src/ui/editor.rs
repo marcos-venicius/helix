@@ -1607,11 +1607,21 @@ impl Component for EditorView {
             }
 
             Event::Mouse(event) => {
-                if let Some(explorer) = &mut self.explorer {
-                    if explorer.contains(event.column, event.row) {
-                        explorer.handle_mouse(event, cx.editor);
-                        return EventResult::Consumed(None);
+                let in_explorer = self
+                    .explorer
+                    .as_ref()
+                    .is_some_and(|explorer| explorer.contains(event.column, event.row));
+                if in_explorer {
+                    // Like a click in the editor, dismiss pending keys.
+                    if event.kind != MouseEventKind::Moved {
+                        self.handle_non_key_input(&mut cx);
                     }
+                    if let Some(explorer) = &mut self.explorer {
+                        explorer.handle_mouse(event, cx.editor);
+                    }
+                    return EventResult::Consumed(None);
+                }
+                if let Some(explorer) = &mut self.explorer {
                     if matches!(event.kind, MouseEventKind::Down(_)) {
                         explorer.unfocus();
                     }
