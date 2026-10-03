@@ -1466,6 +1466,10 @@ impl Component for EditorView {
         };
 
         match event {
+            Event::Paste(_) if self.explorer.as_ref().is_some_and(Explorer::is_focused) => {
+                // The buffer isn't the focus, a paste there would go unnoticed.
+                EventResult::Consumed(None)
+            }
             Event::Paste(contents) => {
                 self.handle_non_key_input(&mut cx);
                 cx.count = cx.editor.count;
