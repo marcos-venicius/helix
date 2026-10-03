@@ -275,6 +275,9 @@ pub struct ExplorerConfig {
     pub hide_gitignored: bool,
     /// Show file type icons, which need a Nerd Font. Defaults to true.
     pub icons: bool,
+    /// Expand the tree to the file of the current buffer and select it whenever the current buffer
+    /// changes, while the panel isn't focused. Defaults to true.
+    pub auto_reveal: bool,
 }
 
 impl Default for ExplorerConfig {
@@ -283,6 +286,7 @@ impl Default for ExplorerConfig {
             width: 30,
             hide_gitignored: false,
             icons: true,
+            auto_reveal: true,
         }
     }
 }

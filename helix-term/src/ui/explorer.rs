@@ -66,6 +66,8 @@ pub struct Explorer {
     /// The view and buffer the editor showed while the panel had the focus. When they change, the
     /// user went back to editing, so the panel gives the focus back.
     focus_target: Option<(ViewId, DocumentId)>,
+    /// File of the current buffer last revealed by `follow`.
+    followed: Option<PathBuf>,
 }
 
 /// What the panel did with a key.
@@ -79,8 +81,10 @@ impl Explorer {
         let mut explorer = Self::empty(helix_stdx::env::current_working_dir());
         explorer.sync_focus_target(editor);
         explorer.refresh(editor);
-        if let Some(path) = doc!(editor).path().map(Path::to_path_buf) {
-            explorer.reveal(&path);
+        let current = doc!(editor).path();
+        explorer.followed = current.map(Path::to_path_buf);
+        if let Some(path) = current {
+            explorer.reveal(path);
         }
         explorer
     }
@@ -101,6 +105,7 @@ impl Explorer {
             hiding: false,
             confirm_delete: None,
             focus_target: None,
+            followed: None,
         }
     }
 
@@ -204,6 +209,18 @@ impl Explorer {
             self.rebuild();
         }
         self.select(path);
+    }
+
+    /// Reveals the file of the current buffer when it changed since the last time, unless the panel
+    /// is focused: then the user is moving through the tree and the selection stays theirs.
+    fn follow(&mut self, current: Option<&Path>) {
+        if self.focused || current == self.followed.as_deref() {
+            return;
+        }
+        self.followed = current.map(Path::to_path_buf);
+        if let Some(path) = current {
+            self.reveal(path);
+        }
     }
 
     /// Directory that new and pasted files go to: the selected directory, or the parent of the
@@ -509,6 +526,9 @@ impl Explorer {
         self.check_focus_target(editor);
         if self.hiding != self.hide_ignored(editor) {
             self.refresh(editor);
+        }
+        if editor.config().explorer.auto_reveal {
+            self.follow(doc!(editor).path());
         }
         self.area = area;
         let theme = &editor.theme;
@@ -971,6 +991,31 @@ mod tests {
         let keymaps = Keymaps::new(Box::new(arc_swap::ArcSwap::from_pointee(keymap)));
         assert!(leads_to_keymap(&keymaps, Mode::Normal, key!(',')));
         assert!(!leads_to_keymap(&keymaps, Mode::Normal, key!(' ')));
+    }
+
+    #[test]
+    fn follows_the_current_file_while_unfocused() {
+        let dir = repo();
+        let root = dir.path();
+        let mut explorer = Explorer::empty(root.to_path_buf());
+        explorer.rebuild();
+        explorer.focused = false;
+        let selected = |explorer: &Explorer| explorer.selected().unwrap().path.clone();
+
+        let public = root.join("src/nested/public.txt");
+        explorer.follow(Some(&public));
+        assert!(explorer.expanded.contains(&root.join("src/nested")));
+        assert_eq!(selected(&explorer), public);
+
+        // Same buffer: the selection moved by the user stays.
+        explorer.cursor = 0;
+        explorer.follow(Some(&public));
+        assert_eq!(explorer.cursor, 0);
+
+        // While focused, the tree doesn't move under the user.
+        explorer.focused = true;
+        explorer.follow(Some(&root.join("README.md")));
+        assert_eq!(explorer.cursor, 0);
     }
 
     #[test]
