@@ -1,3 +1,4 @@
+pub(crate) mod claude;
 pub(crate) mod dap;
 pub(crate) mod lsp;
 pub(crate) mod syntax;
@@ -604,6 +605,8 @@ impl MappableCommand {
         shell_append_output, "Append shell command output after selections",
         shell_keep_pipe, "Filter selections with shell predicate",
         suspend, "Suspend and return to shell",
+        claude_code, "Toggle the Claude Code popup (starts a session with file/selection context)",
+        claude_session_picker, "Open Claude Code session picker",
         rename_symbol, "Rename symbol",
         increment, "Increment item under cursor",
         decrement, "Decrement item under cursor",
@@ -6760,6 +6763,16 @@ fn shell_prompt_for_behavior(cx: &mut Context, prompt: Cow<'static, str>, behavi
     shell_prompt(cx, prompt, move |cx, args| {
         shell(cx, args.join(" ").as_str(), &behavior)
     })
+}
+
+fn claude_code(cx: &mut Context) {
+    cx.callback.push(Box::new(|compositor, cx| {
+        claude::toggle(cx.editor, compositor)
+    }));
+}
+
+fn claude_session_picker(cx: &mut Context) {
+    cx.push_layer(Box::new(overlaid(claude::session_picker())));
 }
 
 fn suspend(_cx: &mut Context) {

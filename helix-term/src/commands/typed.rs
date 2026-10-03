@@ -1611,12 +1611,19 @@ fn reload_all(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> 
         return Ok(());
     }
 
-    let scrolloff = cx.editor.config().scrolloff;
-    let view_id = view!(cx.editor).id;
+    reload_documents(cx.editor, false);
+    Ok(())
+}
 
-    let docs_view_ids: Vec<(DocumentId, Vec<ViewId>)> = cx
-        .editor
+/// Reload documents from their source files. When `skip_modified` is set, documents with
+/// unsaved changes (and documents without a path) are left untouched.
+pub(crate) fn reload_documents(editor: &mut Editor, skip_modified: bool) {
+    let scrolloff = editor.config().scrolloff;
+    let view_id = view!(editor).id;
+
+    let docs_view_ids: Vec<(DocumentId, Vec<ViewId>)> = editor
         .documents_mut()
+        .filter(|doc| !skip_modified || (doc.path().is_some() && !doc.is_modified()))
         .map(|doc| {
             let mut view_ids: Vec<_> = doc.selections().keys().cloned().collect();
 
@@ -1630,37 +1637,36 @@ fn reload_all(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> 
         .collect();
 
     for (doc_id, view_ids) in docs_view_ids {
-        let doc = doc_mut!(cx.editor, &doc_id);
+        let doc = doc_mut!(editor, &doc_id);
 
         // Every doc is guaranteed to have at least 1 view at this point.
-        let view = view_mut!(cx.editor, view_ids[0]);
+        let view = view_mut!(editor, view_ids[0]);
 
         // Ensure that the view is synced with the document's history.
         view.sync_changes(doc);
 
         // Per-document trust: each doc's workspace may differ.
-        let trust_full = cx
-            .editor
+        let trust_full = editor
             .workspace_trust
             .query(
                 doc.workspace_root(),
                 helix_loader::workspace_trust::TrustQuery::Git,
             )
             .is_trusted();
-        if let Err(error) = doc.reload(view, &cx.editor.diff_providers, trust_full) {
-            cx.editor.set_error(format!("{}", error));
+        if let Err(error) = doc.reload(view, &editor.diff_providers, trust_full) {
+            editor.set_error(format!("{}", error));
             continue;
         }
 
         if let Some(path) = doc.path().map(ToOwned::to_owned) {
-            cx.editor
+            editor
                 .language_servers
                 .file_event_handler
                 .file_changed(path);
         }
 
         for view_id in view_ids {
-            let view = view_mut!(cx.editor, view_id);
+            let view = view_mut!(editor, view_id);
             if view.doc.eq(&doc_id) {
                 // Reloading commits the diff against disk through the first view
                 // only (above). Any other view onto this document is left
@@ -1673,8 +1679,6 @@ fn reload_all(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> 
             }
         }
     }
-
-    Ok(())
 }
 
 /// Update the [`Document`] if it has been modified.
@@ -2646,6 +2650,25 @@ fn pipe_impl(
     }
 
     shell(cx, &args.join(" "), behavior);
+    Ok(())
+}
+
+fn claude(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+
+    let prompt = args.join(" ");
+    cx.jobs.callback(async move {
+        let call = move |editor: &mut Editor, compositor: &mut Compositor| {
+            if prompt.trim().is_empty() {
+                super::claude::toggle(editor, compositor)
+            } else {
+                super::claude::start(editor, compositor, prompt)
+            }
+        };
+        Ok(Callback::EditorCompositor(Box::new(call)))
+    });
     Ok(())
 }
 
@@ -3973,6 +3996,17 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         fun: run_shell_command,
         completer: SHELL_COMPLETER,
         signature: SHELL_SIGNATURE,
+    },
+    TypableCommand {
+        name: "claude",
+        aliases: &["ai"],
+        doc: "Toggle the Claude Code popup. With arguments, start a new session with the current file, line and selection as context and send them as the first message.",
+        fun: claude,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, None),
+            ..Signature::DEFAULT
+        },
     },
     TypableCommand {
         name: "reset-diff-change",
