@@ -87,7 +87,7 @@ impl Explorer {
         let current = doc!(editor).path();
         explorer.followed = current.map(Path::to_path_buf);
         if let Some(path) = current {
-            explorer.reveal(path);
+            explorer.reveal(path, true);
         }
         explorer
     }
@@ -192,6 +192,10 @@ impl Explorer {
     fn rebuild(&mut self) {
         let selected = self.selected().map(|node| node.path.clone());
         self.expanded.retain(|dir| dir.is_dir());
+        // Collapsed directories are listed again when expanded, instead of being checked for
+        // changes on every refresh.
+        self.listings
+            .retain(|dir, _| *dir == self.root || self.expanded.contains(dir));
         self.nodes = build_tree(&self.root, &self.expanded, self.hiding, &mut self.listings);
         self.cursor = self.cursor.min(self.nodes.len().saturating_sub(1));
         if let Some(path) = selected {
@@ -205,19 +209,38 @@ impl Explorer {
         }
     }
 
-    /// Expands the parent directories of `path` and selects it.
-    pub fn reveal(&mut self, path: &Path) {
+    /// Expands the parent directories of `path` and selects it. Without `into_ignored`, a path
+    /// inside a directory ignored by git is left alone.
+    pub fn reveal(&mut self, path: &Path, into_ignored: bool) {
         let Some(parent) = path.parent() else {
             return;
         };
         let Ok(relative) = parent.strip_prefix(&self.root) else {
             return;
         };
+        let mut dirs = Vec::new();
         let mut dir = self.root.clone();
-        let mut changed = false;
+        let mut dir_ignored = false;
         for component in relative.components() {
-            dir.push(component);
-            changed |= self.expanded.insert(dir.clone());
+            let child = dir.join(component);
+            let entry = listing(&mut self.listings, &dir, dir_ignored)
+                .entries
+                .iter()
+                .find(|entry| entry.path == child);
+            // Not listed: gone, or inside `.git`.
+            let Some(entry) = entry else {
+                return;
+            };
+            if entry.ignored && !into_ignored {
+                return;
+            }
+            dir_ignored = entry.ignored;
+            dirs.push(child.clone());
+            dir = child;
+        }
+        let mut changed = false;
+        for dir in dirs {
+            changed |= self.expanded.insert(dir);
         }
         if changed {
             self.rebuild();
@@ -233,7 +256,9 @@ impl Explorer {
         }
         self.followed = current.map(Path::to_path_buf);
         if let Some(path) = current {
-            self.reveal(path);
+            // An ignored directory (`target`, `node_modules`) can be huge, the user goes in there
+            // on purpose.
+            self.reveal(path, false);
         }
     }
 
@@ -494,7 +519,7 @@ impl Explorer {
         };
         self.cut = None;
         self.refresh(editor);
-        self.reveal(&new);
+        self.reveal(&new, true);
         Ok(())
     }
 
@@ -719,7 +744,7 @@ fn refresh_later(cx: &mut compositor::Context, path: PathBuf, moved_from: Option
                         explorer.moved(&old, &path);
                     }
                     explorer.refresh(editor);
-                    explorer.reveal(&path);
+                    explorer.reveal(&path, true);
                     if explorer.focused {
                         explorer.sync_focus_target(editor);
                     }
@@ -916,20 +941,7 @@ fn push_children(
     listings: &mut Listings,
     nodes: &mut Vec<Node>,
 ) {
-    let listing = match listings.get(dir) {
-        Some(listing) if listing.dir_ignored == dir_ignored => listing,
-        _ => {
-            let listing = Listing {
-                stamp: stamp(dir),
-                listed_at: SystemTime::now(),
-                dir_ignored,
-                entries: list_dir(dir, dir_ignored),
-            };
-            listings.insert(dir.to_path_buf(), listing);
-            &listings[dir]
-        }
-    };
-    let entries: Vec<Node> = listing
+    let entries: Vec<Node> = listing(listings, dir, dir_ignored)
         .entries
         .iter()
         .filter(|entry| !(hide_ignored && entry.ignored))
@@ -953,6 +965,23 @@ fn push_children(
             );
         }
     }
+}
+
+/// The listing of `dir`, read from disk unless it is already there.
+fn listing<'a>(listings: &'a mut Listings, dir: &Path, dir_ignored: bool) -> &'a Listing {
+    let listed = listings
+        .get(dir)
+        .is_some_and(|listing| listing.dir_ignored == dir_ignored);
+    if !listed {
+        let listing = Listing {
+            stamp: stamp(dir),
+            listed_at: SystemTime::now(),
+            dir_ignored,
+            entries: list_dir(dir, dir_ignored),
+        };
+        listings.insert(dir.to_path_buf(), listing);
+    }
+    &listings[dir]
 }
 
 /// Entries of `dir`, directories first. Everything inside an ignored directory is ignored too.
@@ -1130,10 +1159,29 @@ mod tests {
         explorer.follow(Some(&public));
         assert_eq!(explorer.cursor, 0);
 
+        // Ignored directories aren't opened.
+        explorer.follow(Some(&root.join("target/debug/app")));
+        assert!(!explorer.expanded.contains(&root.join("target")));
+        assert_eq!(explorer.cursor, 0);
+
         // While focused, the tree doesn't move under the user.
         explorer.focused = true;
         explorer.follow(Some(&root.join("README.md")));
         assert_eq!(explorer.cursor, 0);
+    }
+
+    #[test]
+    fn collapsed_directories_are_not_kept() {
+        let dir = repo();
+        let root = dir.path();
+        let mut explorer = Explorer::empty(root.to_path_buf());
+        explorer.reveal(&root.join("src/nested/public.txt"), true);
+        assert!(explorer.listings.contains_key(&root.join("src/nested")));
+
+        explorer.expanded.remove(&root.join("src"));
+        explorer.expanded.remove(&root.join("src/nested"));
+        explorer.rebuild();
+        assert_eq!(explorer.listings.keys().collect::<Vec<_>>(), [root]);
     }
 
     #[test]
