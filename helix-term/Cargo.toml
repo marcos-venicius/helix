@@ -88,6 +88,7 @@ dashmap = "6.2"
 
 parking_lot.workspace = true
 alacritty_terminal = "0.26"
+imara-diff = "0.2.0"
 
 [target.'cfg(windows)'.dependencies]
 crossterm = { version = "0.28", features = ["event-stream"] }

@@ -1,5 +1,6 @@
 pub mod claude;
 mod completion;
+pub mod diff_view;
 mod document;
 pub(crate) mod editor;
 mod info;

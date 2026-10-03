@@ -1,5 +1,6 @@
 pub(crate) mod claude;
 pub(crate) mod dap;
+pub(crate) mod diff_view;
 pub(crate) mod lsp;
 pub(crate) mod syntax;
 pub(crate) mod typed;
@@ -607,6 +608,7 @@ impl MappableCommand {
         suspend, "Suspend and return to shell",
         claude_code, "Toggle the Claude Code popup (starts a session with file/selection context)",
         claude_session_picker, "Open Claude Code session picker",
+        git_diff_view, "Open a side by side git diff of the current file",
         rename_symbol, "Rename symbol",
         increment, "Increment item under cursor",
         decrement, "Decrement item under cursor",
@@ -3509,6 +3511,7 @@ fn changed_file_picker(cx: &mut Context) {
         PickerColumn::new("change", |change: &FileChange, data: &FileChangeData| {
             match change {
                 FileChange::Untracked { .. } => Span::styled("+ untracked", data.style_untracked),
+                FileChange::Added { .. } => Span::styled("+ added", data.style_untracked),
                 FileChange::Modified { .. } => Span::styled("~ modified", data.style_modified),
                 FileChange::Conflict { .. } => Span::styled("x conflict", data.style_conflict),
                 FileChange::Deleted { .. } => Span::styled("- deleted", data.style_deleted),
@@ -3525,6 +3528,7 @@ fn changed_file_picker(cx: &mut Context) {
             };
             match change {
                 FileChange::Untracked { path } => display_path(path),
+                FileChange::Added { path } => display_path(path),
                 FileChange::Modified { path } => display_path(path),
                 FileChange::Conflict { path } => display_path(path),
                 FileChange::Deleted { path } => display_path(path),
@@ -3560,7 +3564,8 @@ fn changed_file_picker(cx: &mut Context) {
             }
         },
     )
-    .with_preview(|_editor, meta| Some((meta.path().into(), None)));
+    .with_preview(|_editor, meta| Some((meta.path().into(), None)))
+    .with_key_handler(crate::ctrl!('g'), diff_view::open_from_picker);
     let injector = picker.injector();
 
     let trust_full = cx
@@ -6768,6 +6773,12 @@ fn shell_prompt_for_behavior(cx: &mut Context, prompt: Cow<'static, str>, behavi
 fn claude_code(cx: &mut Context) {
     cx.callback.push(Box::new(|compositor, cx| {
         claude::toggle(cx.editor, compositor)
+    }));
+}
+
+fn git_diff_view(cx: &mut Context) {
+    cx.callback.push(Box::new(|compositor, cx| {
+        diff_view::open_current(cx.editor, compositor)
     }));
 }
 

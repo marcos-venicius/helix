@@ -1,8 +1,19 @@
 # Helix fork (marcos-venicius/helix)
 
 This repository is a personal fork of [helix-editor/helix](https://github.com/helix-editor/helix).
-It carries features that won't be accepted upstream (for example the Claude Code popup, see
-`docs/claude-code-improvements.md`), while staying in sync with upstream fixes and improvements.
+It carries features that won't be accepted upstream, while staying in sync with upstream fixes and
+improvements.
+
+## Fork features
+
+What each feature does and how to use it is documented for users in [FORK.md](FORK.md). Where the
+code lives:
+
+| Feature | Code |
+| --- | --- |
+| Claude Code popup | `helix-term/src/ui/claude.rs`, `helix-term/src/commands/claude.rs` |
+| Side by side git diff | `helix-term/src/ui/diff_view.rs`, `helix-term/src/commands/diff_view.rs` |
+| Staged files in the changed files picker | `status()` and its helpers in `helix-vcs/src/git.rs`, `FileChange::Added` in `helix-vcs/src/status.rs` |
 
 ## Branches
 
@@ -27,6 +38,8 @@ Remotes:
   leak into it.
 - Keep `marcos` in sync with upstream (below) before starting new features and whenever upstream has
   news.
+- Every PR that adds or changes a fork feature updates [FORK.md](FORK.md) (usage, limitations, ideas)
+  and the code table in [Fork features](#fork-features).
 
 ## Syncing with upstream
 
@@ -54,14 +67,21 @@ cargo xtask docgen                    # regenerates book/src/generated/*.md
 
 ### Expected conflicts
 
-Our features keep upstream files mostly untouched: the logic lives in new files
-(`helix-term/src/ui/claude.rs`, `helix-term/src/commands/claude.rs`), and upstream files only get
-small hooks. When upstream touches the same spots:
+Our features keep upstream files mostly untouched: the logic lives in new files (see
+[Fork features](#fork-features)), and upstream files only get small hooks. When upstream touches
+the same spots:
 
 - `helix-term/src/keymap/default.rs`, the `static_commands!` list in `helix-term/src/commands.rs`,
   `TYPABLE_COMMAND_LIST` in `helix-term/src/commands/typed.rs`: usually keep both sides.
+- `helix-term/src/ui/picker.rs`: we add a generic `with_key_handler` (a `key_handlers` field, its
+  builder and a check at the top of the key match in `handle_event`). Keep upstream's version and
+  re-add those pieces; `changed_file_picker` in `helix-term/src/commands.rs` uses it for `C-g`.
+- `helix-vcs/src/git.rs`: `status()` is rewritten to also list staged changes (`into_iter` instead of
+  `into_index_worktree_iter`, merging both kinds of change per file), and `FileChange` has an extra
+  `Added` variant. If upstream changes `status()`, port their change onto our version and run
+  `cargo test -p helix-vcs --features git`, which covers the staged cases.
 - `Cargo.lock`: take upstream's version, then run `cargo build` to add our dependencies back
-  (`alacritty_terminal`).
+  (`alacritty_terminal`, `imara-diff` in `helix-term`).
 - `book/src/generated/*.md`: don't resolve by hand; take either side and run `cargo xtask docgen`.
 
 When adding a feature, follow the same pattern: put the code in new modules and keep changes to

@@ -1,5 +1,5 @@
 > [!NOTE]
-> **Personal fork** of [helix-editor/helix](https://github.com/helix-editor/helix) with extra features that are not part of upstream, such as an embedded Claude Code popup ([docs](docs/claude-code-improvements.md)).
+> **Personal fork** of [helix-editor/helix](https://github.com/helix-editor/helix) with extra features that are not part of upstream: see [FORK.md](FORK.md).
 > The default branch `marcos` is kept in sync with upstream `master`; see [CLAUDE.md](CLAUDE.md) for the workflow.
 > Please report issues with the fork's features here, not upstream.
 
