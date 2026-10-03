@@ -7,8 +7,9 @@
 //! they lead to the space menu or the command line, and the panel gives the focus back as soon as
 //! the editor shows another view or buffer (a picker or `:open` opened a file, ...).
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
 
 use anyhow::bail;
 use helix_view::document::Mode;
@@ -29,6 +30,7 @@ use crate::{ctrl, key};
 const HELP: &str = "a: new (end with / for a directory)  r: rename  x: cut  p: paste  d: delete  \
                     R: refresh  H: show/hide git ignored  q: close  esc: back to the editor";
 
+#[derive(Clone)]
 struct Node {
     path: PathBuf,
     name: String,
@@ -42,6 +44,8 @@ pub struct Explorer {
     root: PathBuf,
     /// The visible tree, flattened in display order.
     nodes: Vec<Node>,
+    /// Listed directories, so expanding or collapsing one doesn't read the others again.
+    listings: Listings,
     expanded: HashSet<PathBuf>,
     cursor: usize,
     scroll: usize,
@@ -83,6 +87,7 @@ impl Explorer {
         Self {
             root,
             nodes: Vec::new(),
+            listings: HashMap::new(),
             expanded: HashSet::new(),
             cursor: 0,
             scroll: 0,
@@ -140,23 +145,33 @@ impl Explorer {
         self.nodes.get(self.cursor)
     }
 
-    /// Lists the tree again from disk, keeping the expanded directories and the selection.
+    /// Updates the tree from disk, keeping the expanded directories and the selection. Only the
+    /// directories that changed since they were listed are read again.
     pub fn refresh(&mut self, editor: &Editor) {
         let cwd = helix_stdx::env::current_working_dir();
         if cwd != self.root {
             self.root = cwd;
             self.expanded.clear();
+            self.listings.clear();
             self.cursor = 0;
             self.scroll = 0;
         }
+        drop_changed_listings(&mut self.listings);
         self.hiding = self.hide_ignored(editor);
         self.rebuild();
+    }
+
+    /// Reads every directory again, for the changes `refresh` can't see (global git excludes,
+    /// coarse modification times).
+    fn reload(&mut self, editor: &Editor) {
+        self.listings.clear();
+        self.refresh(editor);
     }
 
     fn rebuild(&mut self) {
         let selected = self.selected().map(|node| node.path.clone());
         self.expanded.retain(|dir| dir.is_dir());
-        self.nodes = build_tree(&self.root, &self.expanded, self.hiding);
+        self.nodes = build_tree(&self.root, &self.expanded, self.hiding, &mut self.listings);
         self.cursor = self.cursor.min(self.nodes.len().saturating_sub(1));
         if let Some(path) = selected {
             self.select(&path);
@@ -319,7 +334,7 @@ impl Explorer {
                 }
             }
             key!('R') => {
-                self.refresh(cx.editor);
+                self.reload(cx.editor);
                 cx.editor.set_status("Explorer refreshed");
             }
             key!('H') => {
@@ -696,9 +711,63 @@ fn holds_command(node: &KeyTrieNode, name: &str) -> bool {
     })
 }
 
-fn build_tree(root: &Path, expanded: &HashSet<PathBuf>, hide_ignored: bool) -> Vec<Node> {
+type Listings = HashMap<PathBuf, Listing>;
+
+/// The entries of a directory, as listed at `stamp`.
+struct Listing {
+    stamp: Stamp,
+    listed_at: SystemTime,
+    /// Whether the directory itself was ignored, which makes all its entries ignored.
+    dir_ignored: bool,
+    entries: Vec<Node>,
+}
+
+/// Modification times of a directory and of its `.gitignore`. The first changes when entries are
+/// added, removed or renamed, the second when the ignore rules of the directory change.
+type Stamp = (Option<SystemTime>, Option<SystemTime>);
+
+fn stamp(dir: &Path) -> Stamp {
+    let modified = |path: &Path| path.metadata().and_then(|meta| meta.modified()).ok();
+    (modified(dir), modified(&dir.join(".gitignore")))
+}
+
+/// Modification times are coarse (a kernel tick on Linux), so a change made right after a listing
+/// can keep the same time. Like git's "racy" entries, a listing made this soon after a change is
+/// never trusted.
+const RACY: Duration = Duration::from_secs(2);
+
+impl Listing {
+    fn is_current(&self, dir: &Path) -> bool {
+        let (dir_time, ignore_time) = self.stamp;
+        let racy = [dir_time, ignore_time]
+            .into_iter()
+            .flatten()
+            .any(|time| time + RACY >= self.listed_at);
+        !racy && stamp(dir) == self.stamp
+    }
+}
+
+/// Drops the listings of the directories that changed on disk, with the ones below them: a
+/// `.gitignore` applies to the whole subtree.
+fn drop_changed_listings(listings: &mut Listings) {
+    let changed: Vec<PathBuf> = listings
+        .iter()
+        .filter(|(dir, listing)| !listing.is_current(dir))
+        .map(|(dir, _)| dir.clone())
+        .collect();
+    if !changed.is_empty() {
+        listings.retain(|dir, _| !changed.iter().any(|changed| dir.starts_with(changed)));
+    }
+}
+
+fn build_tree(
+    root: &Path,
+    expanded: &HashSet<PathBuf>,
+    hide_ignored: bool,
+    listings: &mut Listings,
+) -> Vec<Node> {
     let mut nodes = Vec::new();
-    push_children(root, 0, false, expanded, hide_ignored, &mut nodes);
+    push_children(root, 0, false, expanded, hide_ignored, listings, &mut nodes);
     nodes
 }
 
@@ -708,24 +777,50 @@ fn push_children(
     dir_ignored: bool,
     expanded: &HashSet<PathBuf>,
     hide_ignored: bool,
+    listings: &mut Listings,
     nodes: &mut Vec<Node>,
 ) {
-    for node in list_dir(dir, depth, dir_ignored) {
-        if hide_ignored && node.ignored {
-            continue;
+    let listing = match listings.get(dir) {
+        Some(listing) if listing.dir_ignored == dir_ignored => listing,
+        _ => {
+            let listing = Listing {
+                stamp: stamp(dir),
+                listed_at: SystemTime::now(),
+                dir_ignored,
+                entries: list_dir(dir, dir_ignored),
+            };
+            listings.insert(dir.to_path_buf(), listing);
+            &listings[dir]
         }
+    };
+    let entries: Vec<Node> = listing
+        .entries
+        .iter()
+        .filter(|entry| !(hide_ignored && entry.ignored))
+        .cloned()
+        .collect();
+    for mut node in entries {
+        node.depth = depth;
         let path = node.path.clone();
         let ignored = node.ignored;
         let expand = node.is_dir && expanded.contains(&path);
         nodes.push(node);
         if expand {
-            push_children(&path, depth + 1, ignored, expanded, hide_ignored, nodes);
+            push_children(
+                &path,
+                depth + 1,
+                ignored,
+                expanded,
+                hide_ignored,
+                listings,
+                nodes,
+            );
         }
     }
 }
 
 /// Entries of `dir`, directories first. Everything inside an ignored directory is ignored too.
-fn list_dir(dir: &Path, depth: usize, dir_ignored: bool) -> Vec<Node> {
+fn list_dir(dir: &Path, dir_ignored: bool) -> Vec<Node> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
     };
@@ -754,11 +849,16 @@ fn list_dir(dir: &Path, depth: usize, dir_ignored: bool) -> Vec<Node> {
         .filter(|entry| entry.file_name() != ".git")
         .map(|entry| {
             let path = entry.path();
+            // Only symlinks need another stat to know where they lead.
+            let is_dir = match entry.file_type() {
+                Ok(file_type) if !file_type.is_symlink() => file_type.is_dir(),
+                _ => path.is_dir(),
+            };
             Node {
                 name: entry.file_name().to_string_lossy().into_owned(),
-                is_dir: path.is_dir(),
+                is_dir,
                 ignored: dir_ignored || !not_ignored.contains(&path),
-                depth,
+                depth: 0,
                 path,
             }
         })
@@ -810,7 +910,7 @@ mod tests {
             .iter()
             .map(|path| root.join(path))
             .collect();
-        let tree = build_tree(root, &expanded, false);
+        let tree = build_tree(root, &expanded, false, &mut HashMap::new());
         let expected = [
             ("src", false),
             ("  nested", false),
@@ -868,7 +968,7 @@ mod tests {
         let dir = repo();
         let root = dir.path();
         let expanded: HashSet<PathBuf> = [root.join("src"), root.join("src/nested")].into();
-        let tree = build_tree(root, &expanded, true);
+        let tree = build_tree(root, &expanded, true, &mut HashMap::new());
         let names: Vec<String> = names(&tree).into_iter().map(|(name, _)| name).collect();
         assert_eq!(
             names,
@@ -882,5 +982,48 @@ mod tests {
                 "README.md"
             ]
         );
+    }
+
+    #[test]
+    fn lists_again_only_what_changed() {
+        let dir = repo();
+        let root = dir.path();
+        let expanded: HashSet<PathBuf> = [root.join("src")].into();
+        let mut listings = HashMap::new();
+        let names_of = |listings: &mut Listings| -> Vec<(String, bool)> {
+            names(&build_tree(root, &expanded, false, listings))
+        };
+        names_of(&mut listings);
+
+        // Unchanged directories come from the listings.
+        std::fs::write(root.join("src/lib.rs"), "").unwrap();
+        assert!(!names_of(&mut listings).contains(&("  lib.rs".into(), false)));
+        // The directory's modification time changed, so it is listed again.
+        drop_changed_listings(&mut listings);
+        assert!(names_of(&mut listings).contains(&("  lib.rs".into(), false)));
+
+        // A changed `.gitignore` lists its directory and everything below it again.
+        std::fs::write(root.join(".gitignore"), "target/\n*.log\n*.rs\n").unwrap();
+        drop_changed_listings(&mut listings);
+        let tree = names_of(&mut listings);
+        assert!(tree.contains(&("  lib.rs".into(), true)));
+        assert!(tree.contains(&("  main.rs".into(), true)));
+    }
+
+    #[test]
+    fn listing_is_current_until_the_directory_changes() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let an_hour_ago = SystemTime::now() - Duration::from_secs(3600);
+        std::fs::File::open(root)
+            .unwrap()
+            .set_modified(an_hour_ago)
+            .unwrap();
+        let mut listings = HashMap::new();
+        build_tree(root, &HashSet::new(), false, &mut listings);
+        assert!(listings[root].is_current(root));
+
+        std::fs::write(root.join("new.txt"), "").unwrap();
+        assert!(!listings[root].is_current(root));
     }
 }
