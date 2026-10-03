@@ -143,24 +143,31 @@ Not to be confused with upstream's `space e`, which opens the file explorer pick
 | `a` | Create a file in the selected directory (or next to the selected file). Missing parent directories are created, and a name ending in `/` creates a directory. |
 | `r` | Rename. The new name may contain `/` to move the entry to a subdirectory. |
 | `x`, then `p` | Cut the selected entry, then move it into the selected directory (or next to the selected file). |
-| `d`, then `y` | Delete the selected file or directory (directories are deleted recursively). |
-| `R` | Reload the tree from disk. |
+| `d`, then `y` | Delete the selected file or directory (directories are deleted recursively). Any other key or a click cancels. |
+| `R` | Read the whole tree from disk again. |
 | `H` | Show/hide git ignored files for this session. |
 | `?` | Show the keys in the status line. |
 | `Esc` | Give the focus back to the editor. |
 | `q` | Close the panel. |
 
-`space` and `:` keep working while the panel is focused, so the pickers and commands are available.
-Opening a file focuses the editor and shows the file in the current view. Clicking in the editor
-also gives the focus back to it.
+The space menu (wherever it is mapped: the menu that holds `toggle_explorer` or `file_picker`) and
+`:` keep working while the panel is focused, so the pickers and commands are available. Other keys
+the panel doesn't use are ignored, so they can't edit the buffer behind it, and so are terminal
+pastes.
+
+The panel gives the focus back to the editor as soon as the editor shows another view or buffer:
+opening a file from the panel, a picker or `:open`, or clicking in the editor. Opened files show in
+the current view.
 
 Renames, moves, creations and deletions go through the same code as `:move`, so language servers
 are notified (`willRename`, `didCreate`, ...). Open buffers follow renamed and moved files,
 including files inside a moved directory. Deleting a file closes its buffers, and deleting is
 refused when one of them has unsaved changes. Moves and renames never overwrite an existing file.
 
-The panel is reloaded from disk when it gets the focus, after each operation and with `R`. When the
-working directory changes (`:cd`), the tree follows it on the next reload.
+The tree is updated from disk when the panel gets the focus and after each operation. Directory
+listings are kept: only the directories whose modification time changed (or their `.gitignore`'s,
+with everything below it) are read again. `R` reads everything again. When the working directory
+changes (`:cd`), the tree follows it on the next update.
 
 ### Configuration
 
@@ -177,8 +184,10 @@ focused) and `ui.window` (separator).
 
 ### Limitations
 
-- The tree doesn't watch the disk: files created outside the panel show up on the next reload
+- The tree doesn't watch the disk: files created outside the panel show up on the next update
   (focusing the panel or `R`).
+- Changes to the global git excludes file or `.git/info/exclude`, and to a `.gitignore` of a
+  directory above the working directory, are only picked up by `R`.
 - One entry at a time: there is no multi-selection for moving or deleting several files.
 - Deleting is permanent, there is no trash.
 - Copying files isn't supported, only moving.
