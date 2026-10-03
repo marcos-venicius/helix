@@ -1,3 +1,4 @@
+pub(crate) mod claude;
 pub(crate) mod dap;
 pub(crate) mod lsp;
 pub(crate) mod syntax;
@@ -604,6 +605,7 @@ impl MappableCommand {
         shell_append_output, "Append shell command output after selections",
         shell_keep_pipe, "Filter selections with shell predicate",
         suspend, "Suspend and return to shell",
+        claude_code, "Open Claude Code with file/selection context",
         rename_symbol, "Rename symbol",
         increment, "Increment item under cursor",
         decrement, "Decrement item under cursor",
@@ -6760,6 +6762,12 @@ fn shell_prompt_for_behavior(cx: &mut Context, prompt: Cow<'static, str>, behavi
     shell_prompt(cx, prompt, move |cx, args| {
         shell(cx, args.join(" ").as_str(), &behavior)
     })
+}
+
+fn claude_code(cx: &mut Context) {
+    if let Err(err) = claude::claude_request(cx.editor, None) {
+        cx.editor.set_error(err.to_string());
+    }
 }
 
 fn suspend(_cx: &mut Context) {

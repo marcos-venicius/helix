@@ -301,6 +301,7 @@
 | `shell_append_output` | Append shell command output after selections | normal: `` <A-!> ``, select: `` <A-!> `` |
 | `shell_keep_pipe` | Filter selections with shell predicate | normal: `` $ ``, select: `` $ `` |
 | `suspend` | Suspend and return to shell | normal: `` <C-z> ``, select: `` <C-z> `` |
+| `claude_code` | Open Claude Code with file/selection context | normal: `` <space>i ``, select: `` <space>i `` |
 | `rename_symbol` | Rename symbol | normal: `` <space>r ``, select: `` <space>r `` |
 | `increment` | Increment item under cursor | normal: `` <C-a> ``, select: `` <C-a> `` |
 | `decrement` | Decrement item under cursor | normal: `` <C-x> ``, select: `` <C-x> `` |

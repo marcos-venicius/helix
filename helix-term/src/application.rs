@@ -10,7 +10,7 @@ use helix_stdx::path::get_relative_path;
 use helix_view::{
     align_view,
     document::{DocumentOpenError, DocumentSavedEventResult},
-    editor::{ConfigEvent, EditorEvent},
+    editor::{ConfigEvent, EditorEvent, InteractiveCommand},
     graphics::Rect,
     theme,
     tree::Layout,
@@ -33,6 +33,7 @@ use log::{debug, error, info, warn};
 use std::{
     io::{stdin, IsTerminal},
     path::Path,
+    process::Stdio,
     sync::Arc,
 };
 
@@ -309,7 +310,9 @@ impl Application {
         S: Stream<Item = std::io::Result<TerminalEvent>> + Unpin,
     {
         loop {
-            if self.editor.should_close() {
+            // A pending interactive command also breaks out of the loop: `run` needs to drop the
+            // input stream before handing the terminal over to the child process.
+            if self.editor.should_close() || self.editor.interactive_command.is_some() {
                 return false;
             }
 
@@ -1319,13 +1322,63 @@ impl Application {
         DummyEventStream
     }
 
-    pub async fn run<S>(&mut self, input_stream: &mut S) -> Result<i32, Error>
-    where
-        S: Stream<Item = std::io::Result<TerminalEvent>> + Unpin,
-    {
+    /// Suspends the UI, runs `cmd` with the terminal attached and restores the UI afterwards.
+    async fn run_interactive_command(&mut self, cmd: InteractiveCommand) {
+        if let Err(err) = self.restore_term() {
+            self.editor
+                .set_error(format!("Failed to release terminal: {err}"));
+            return;
+        }
+
+        let status = tokio::process::Command::new(&cmd.program)
+            .args(&cmd.args)
+            .current_dir(&cmd.cwd)
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .await;
+
+        for retries in 1..=10 {
+            match self.terminal.claim() {
+                Ok(()) => break,
+                Err(err) if retries == 10 => panic!("Failed to claim terminal: {}", err),
+                Err(_) => continue,
+            }
+        }
+        let area = self.terminal.size();
+        self.compositor.resize(area);
+        self.terminal.clear().expect("couldn't clear terminal");
+
+        // The program may have edited files on disk.
+        crate::commands::reload_documents(&mut self.editor, true);
+
+        match status {
+            Ok(status) if status.success() => {}
+            Ok(status) => self
+                .editor
+                .set_error(format!("'{}' exited with {status}", cmd.program)),
+            Err(err) => self
+                .editor
+                .set_error(format!("Failed to run '{}': {err}", cmd.program)),
+        }
+    }
+
+    pub async fn run(&mut self) -> Result<i32, Error> {
         self.terminal.claim()?;
 
-        self.event_loop(input_stream).await;
+        loop {
+            let mut input_stream = self.event_stream();
+            self.event_loop(&mut input_stream).await;
+            // Dropping the stream stops the terminal reader thread so that the child process
+            // gets exclusive access to stdin.
+            drop(input_stream);
+
+            match self.editor.interactive_command.take() {
+                Some(cmd) => self.run_interactive_command(cmd).await,
+                None => break,
+            }
+        }
 
         let close_errs = self.close().await;
 
