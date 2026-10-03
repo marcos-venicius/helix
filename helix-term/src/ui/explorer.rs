@@ -387,18 +387,21 @@ impl Explorer {
             None,
             ui::completers::none,
             move |cx, input, event| {
-                if event != PromptEvent::Validate || input.trim().is_empty() {
+                let input = input.trim();
+                if event != PromptEvent::Validate || input.is_empty() {
                     return;
                 }
                 let is_dir = input.ends_with('/');
                 let path = helix_stdx::path::normalize(dir.join(input.trim_end_matches('/')));
-                if path.exists() {
+                // Not `exists`, which follows symlinks: writing to a broken one would create its
+                // target, wherever it points.
+                if path.symlink_metadata().is_ok() {
                     cx.editor
                         .set_error(format!("{} already exists", path.display()));
                     return;
                 }
                 match cx.editor.create_path(&path, is_dir) {
-                    Ok(()) => refresh_later(cx, path),
+                    Ok(()) => refresh_later(cx, path, None),
                     Err(err) => cx.editor.set_error(format!("Failed to create: {err}")),
                 }
             },
@@ -417,16 +420,26 @@ impl Explorer {
             None,
             ui::completers::none,
             move |cx, input, event| {
-                if event != PromptEvent::Validate || input.trim().is_empty() {
+                let input = input.trim();
+                if event != PromptEvent::Validate || input.is_empty() {
                     return;
                 }
                 let new = old.parent().unwrap_or(Path::new("")).join(input);
                 match move_entry(cx.editor, &old, &new) {
-                    Ok(new) => refresh_later(cx, new),
+                    Ok(new) => refresh_later(cx, new, Some(old.clone())),
                     Err(err) => cx.editor.set_error(format!("Failed to rename: {err}")),
                 }
             },
         );
+    }
+
+    /// Keeps the cut path pointing to the same entry after `old` was renamed to `new`.
+    fn moved(&mut self, old: &Path, new: &Path) {
+        if let Some(cut) = &mut self.cut {
+            if let Ok(relative) = cut.strip_prefix(old) {
+                *cut = new.join(relative);
+            }
+        }
     }
 
     fn paste(&mut self, editor: &mut Editor) -> anyhow::Result<()> {
@@ -654,8 +667,9 @@ pub fn toggle(editor_view: &mut EditorView, editor: &Editor) {
     }
 }
 
-/// Refreshes the panel and selects `path` once the prompt that changed the files has closed.
-fn refresh_later(cx: &mut compositor::Context, path: PathBuf) {
+/// Refreshes the panel and selects `path` once the prompt that changed the files has closed. When
+/// `path` was renamed from `moved_from`, a cut path inside it follows.
+fn refresh_later(cx: &mut compositor::Context, path: PathBuf, moved_from: Option<PathBuf>) {
     cx.jobs.callback(async move {
         Ok(Callback::EditorCompositor(Box::new(
             move |editor, compositor| {
@@ -663,6 +677,9 @@ fn refresh_later(cx: &mut compositor::Context, path: PathBuf) {
                     .find::<EditorView>()
                     .and_then(|view| view.explorer.as_mut());
                 if let Some(explorer) = explorer {
+                    if let Some(old) = moved_from {
+                        explorer.moved(&old, &path);
+                    }
                     explorer.refresh(editor);
                     explorer.reveal(&path);
                     if explorer.focused {
@@ -687,7 +704,7 @@ fn move_entry(editor: &mut Editor, old: &Path, new: &Path) -> anyhow::Result<Pat
     if old.symlink_metadata().is_err() {
         bail!("{} no longer exists", old.display());
     }
-    if new.symlink_metadata().is_ok() {
+    if new.symlink_metadata().is_ok() && !same_entry(old, &new) {
         bail!("{} already exists", new.display());
     }
     if new.starts_with(old) {
@@ -715,7 +732,14 @@ fn move_entry(editor: &mut Editor, old: &Path, new: &Path) -> anyhow::Result<Pat
     } else {
         Vec::new()
     };
-    if let Err(err) = editor.move_path(old, &new) {
+    // `Editor::move_path` checks that `old` exists with `exists`, which follows symlinks, and skips
+    // the rename of a broken one.
+    let moved = if old.exists() {
+        editor.move_path(old, &new)
+    } else {
+        std::fs::rename(old, &new)
+    };
+    if let Err(err) = moved {
         for dir in created {
             let _ = std::fs::remove_dir(dir);
         }
@@ -725,6 +749,25 @@ fn move_entry(editor: &mut Editor, old: &Path, new: &Path) -> anyhow::Result<Pat
         editor.set_doc_path(id, &path);
     }
     Ok(new)
+}
+
+/// Whether `new`, found on disk, is `old` itself under another case: on a case-insensitive
+/// filesystem, renaming `readme.md` to `README.md` finds the destination already there.
+fn same_entry(old: &Path, new: &Path) -> bool {
+    let (Some(old_name), Some(new_name)) = (old.file_name(), new.file_name()) else {
+        return false;
+    };
+    let lowercase = |name: &std::ffi::OsStr| name.to_string_lossy().to_lowercase();
+    if old.parent() != new.parent() || lowercase(old_name) != lowercase(new_name) {
+        return false;
+    }
+    // The directory doesn't hold an entry by the new name, so the match was the old one.
+    let Some(Ok(entries)) = new.parent().map(std::fs::read_dir) else {
+        return false;
+    };
+    !entries
+        .filter_map(Result::ok)
+        .any(|entry| entry.file_name() == new_name)
 }
 
 /// Whether `key` leads out of the panel: to the menu holding `toggle_explorer` or `file_picker`
@@ -1016,6 +1059,30 @@ mod tests {
         explorer.focused = true;
         explorer.follow(Some(&root.join("README.md")));
         assert_eq!(explorer.cursor, 0);
+    }
+
+    #[test]
+    fn a_case_only_rename_is_not_a_conflict() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("readme.md");
+        let new = dir.path().join("README.md");
+        std::fs::write(&old, "").unwrap();
+        // What a case-insensitive filesystem finds at `new` is `old` itself.
+        assert!(same_entry(&old, &new));
+        // Here `new` really is another file.
+        std::fs::write(&new, "").unwrap();
+        assert!(!same_entry(&old, &new));
+        assert!(!same_entry(&old, &dir.path().join("other.md")));
+    }
+
+    #[test]
+    fn the_cut_path_follows_a_rename() {
+        let mut explorer = Explorer::empty(PathBuf::from("/project"));
+        explorer.cut = Some(PathBuf::from("/project/src/main.rs"));
+        explorer.moved(Path::new("/project/lib"), Path::new("/project/core"));
+        assert_eq!(explorer.cut.as_deref(), Some(Path::new("/project/src/main.rs")));
+        explorer.moved(Path::new("/project/src"), Path::new("/project/app"));
+        assert_eq!(explorer.cut.as_deref(), Some(Path::new("/project/app/main.rs")));
     }
 
     #[test]
