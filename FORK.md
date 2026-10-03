@@ -199,8 +199,9 @@ focused) and `ui.window` (separator).
   directory above the working directory, are only picked up by `R`.
 - One entry at a time: there is no multi-selection for moving or deleting several files.
 - Deleting is permanent, there is no trash.
-- Directories are read on the UI thread, so expanding a directory with a huge number of entries can
-  pause the editor briefly.
+- Directories are read on the UI thread. That takes about 1 ms per 1,000 entries (see
+  `cargo bench -p helix-term --features bench --bench explorer`), so only a directory with tens of
+  thousands of entries, or a slow network filesystem, pauses the editor noticeably.
 - Copying files isn't supported, only moving.
 - Icons need a terminal font patched with [Nerd Fonts](https://www.nerdfonts.com/); without one
   they show as boxes, so set `icons = false`. Their colors are fixed, not taken from the theme, and

@@ -14,7 +14,7 @@ code lives:
 | Claude Code popup | `helix-term/src/ui/claude.rs`, `helix-term/src/commands/claude.rs` |
 | Side by side git diff | `helix-term/src/ui/diff_view.rs`, `helix-term/src/commands/diff_view.rs` |
 | Staged files in the changed files picker | `status()` and its helpers in `helix-vcs/src/git.rs`, `FileChange::Added` in `helix-vcs/src/status.rs` |
-| File explorer side panel | `helix-term/src/ui/explorer.rs`; hooks in `EditorView` (`helix-term/src/ui/editor.rs`), `ExplorerConfig` in `helix-view/src/editor.rs` |
+| File explorer side panel | `helix-term/src/ui/explorer.rs` and `helix-term/src/ui/explorer/` (icons, git ignore rules); hooks in `EditorView` (`helix-term/src/ui/editor.rs`), `ExplorerConfig` in `helix-view/src/editor.rs`; benchmarks in `helix-term/benches/explorer.rs` |
 
 ## Branches
 
@@ -88,6 +88,8 @@ the same spots:
   `into_index_worktree_iter`, merging both kinds of change per file), and `FileChange` has an extra
   `Added` variant. If upstream changes `status()`, port their change onto our version and run
   `cargo test -p helix-vcs --features git`, which covers the staged cases.
+- `helix-term/Cargo.toml`: we add a `bench` feature, `criterion` to the dev-dependencies and the
+  `explorer` `[[bench]]`. Keep both sides.
 - `Cargo.lock`: take upstream's version, then run `cargo build` to add our dependencies back
   (`alacritty_terminal`, `imara-diff` in `helix-term`).
 - `book/src/generated/*.md`: don't resolve by hand; take either side and run `cargo xtask docgen`.
