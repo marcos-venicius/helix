@@ -40,5 +40,6 @@ Implementation idea:
   Today Shift/Alt-Enter are mapped to `ESC CR`.
 - Answer OSC 10/11 color queries with the theme colors, so Claude picks a matching light or dark
   theme.
-- Mouse selection and copy inside the popup (today the mouse wheel only scrolls the scrollback).
+- Text selection and copy with the mouse when the app does not track the mouse itself. Claude Code
+  tracks it, so clicks and the wheel are forwarded to it.
 - Show running sessions in the statusline.

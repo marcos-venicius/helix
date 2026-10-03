@@ -18,7 +18,7 @@ use alacritty_terminal::term::{Config, Term, TermMode};
 use alacritty_terminal::tty;
 use alacritty_terminal::vte::ansi::{Color as TermColor, CursorShape, NamedColor};
 use helix_view::graphics::{Color, CursorKind, Modifier, Rect, Style, UnderlineStyle};
-use helix_view::input::{Event, KeyEvent, MouseEventKind};
+use helix_view::input::{Event, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use helix_view::keyboard::{KeyCode, KeyModifiers};
 use helix_view::Editor;
 use tui::buffer::Buffer as Surface;
@@ -211,6 +211,10 @@ impl Session {
     fn scroll(&self, scroll: Scroll) {
         self.term.lock().scroll_display(scroll);
     }
+
+    fn mode(&self) -> TermMode {
+        *self.term.lock().mode()
+    }
 }
 
 impl Drop for Session {
@@ -242,6 +246,7 @@ pub fn show(compositor: &mut Compositor, session: Arc<Session>) {
         ClaudeTerminal {
             session,
             cursor: None,
+            inner: Rect::default(),
         },
     );
 }
@@ -276,6 +281,48 @@ fn inner_area(area: Rect) -> Rect {
 pub struct ClaudeTerminal {
     session: Arc<Session>,
     cursor: Option<(helix_core::Position, CursorKind)>,
+    /// Screen area of the terminal contents, used to translate mouse coordinates.
+    inner: Rect,
+}
+
+impl ClaudeTerminal {
+    fn handle_mouse(&self, mouse: &MouseEvent) {
+        let mode = self.session.mode();
+        let inside = mouse.column >= self.inner.x
+            && mouse.column < self.inner.right()
+            && mouse.row >= self.inner.y
+            && mouse.row < self.inner.bottom();
+
+        // Full screen apps like Claude Code track the mouse and handle scrolling themselves.
+        if mode.intersects(TermMode::MOUSE_MODE) {
+            if inside {
+                let col = mouse.column - self.inner.x;
+                let row = mouse.row - self.inner.y;
+                if let Some(bytes) = encode_mouse(mouse, col, row, mode) {
+                    self.session.write(bytes);
+                }
+            }
+            return;
+        }
+
+        let up = match mouse.kind {
+            MouseEventKind::ScrollUp => true,
+            MouseEventKind::ScrollDown => false,
+            _ => return,
+        };
+        if mode.contains(TermMode::ALT_SCREEN | TermMode::ALTERNATE_SCROLL) {
+            // The alternate screen has no scrollback: send arrow keys like xterm does.
+            let arrow = match (up, mode.contains(TermMode::APP_CURSOR)) {
+                (true, true) => "\x1bOA",
+                (true, false) => "\x1b[A",
+                (false, true) => "\x1bOB",
+                (false, false) => "\x1b[B",
+            };
+            self.session.write(arrow.repeat(3).into_bytes());
+        } else {
+            self.session.scroll(Scroll::Delta(if up { 3 } else { -3 }));
+        }
+    }
 }
 
 impl Component for ClaudeTerminal {
@@ -285,12 +332,10 @@ impl Component for ClaudeTerminal {
             Event::Key(KeyEvent {
                 code: KeyCode::Char('\\' | '4'),
                 modifiers: KeyModifiers::CONTROL,
-            }) => {
-                EventResult::Consumed(Some(Box::new(|compositor: &mut Compositor, cx| {
-                    compositor.remove(ID);
-                    crate::commands::reload_documents(cx.editor, true);
-                })))
-            }
+            }) => EventResult::Consumed(Some(Box::new(|compositor: &mut Compositor, cx| {
+                compositor.remove(ID);
+                crate::commands::reload_documents(cx.editor, true);
+            }))),
             Event::Key(key) => {
                 let app_cursor = self
                     .session
@@ -310,11 +355,7 @@ impl Component for ClaudeTerminal {
                 EventResult::Consumed(None)
             }
             Event::Mouse(mouse) => {
-                match mouse.kind {
-                    MouseEventKind::ScrollUp => self.session.scroll(Scroll::Delta(3)),
-                    MouseEventKind::ScrollDown => self.session.scroll(Scroll::Delta(-3)),
-                    _ => {}
-                }
+                self.handle_mouse(mouse);
                 EventResult::Consumed(None)
             }
             Event::Resize(..) | Event::IdleTimeout | Event::FocusGained | Event::FocusLost => {
@@ -339,6 +380,7 @@ impl Component for ClaudeTerminal {
             .title(title)
             .border_style(theme.get("ui.popup.info"));
         let inner = block.inner(area);
+        self.inner = inner;
         block.render(area, surface);
 
         if inner.width < 2 || inner.height < 2 {
@@ -555,6 +597,59 @@ fn encode_key(key: &KeyEvent, app_cursor: bool) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
+/// Encodes a mouse event for an application that enabled mouse reporting. `col` and `row`
+/// are 0-based and relative to the terminal contents.
+fn encode_mouse(mouse: &MouseEvent, col: u16, row: u16, mode: TermMode) -> Option<Vec<u8>> {
+    let button_code = |button: MouseButton| match button {
+        MouseButton::Left => 0,
+        MouseButton::Middle => 1,
+        MouseButton::Right => 2,
+    };
+    let (code, pressed) = match mouse.kind {
+        MouseEventKind::Down(button) => (button_code(button), true),
+        MouseEventKind::Up(button) => (button_code(button), false),
+        MouseEventKind::Drag(button)
+            if mode.intersects(TermMode::MOUSE_DRAG | TermMode::MOUSE_MOTION) =>
+        {
+            (button_code(button) + 32, true)
+        }
+        MouseEventKind::Moved if mode.contains(TermMode::MOUSE_MOTION) => (35, true),
+        MouseEventKind::ScrollUp => (64, true),
+        MouseEventKind::ScrollDown => (65, true),
+        _ => return None,
+    };
+    let mut code = code;
+    if mouse.modifiers.contains(KeyModifiers::SHIFT) {
+        code += 4;
+    }
+    if mouse.modifiers.contains(KeyModifiers::ALT) {
+        code += 8;
+    }
+    if mouse.modifiers.contains(KeyModifiers::CONTROL) {
+        code += 16;
+    }
+
+    let (x, y) = (col as u32 + 1, row as u32 + 1);
+    if mode.contains(TermMode::SGR_MOUSE) {
+        let suffix = if pressed { 'M' } else { 'm' };
+        return Some(format!("\x1b[<{code};{x};{y}{suffix}").into_bytes());
+    }
+
+    // Legacy X10 encoding: releases are reported as button 3 and coordinates are limited.
+    let code = if pressed { code } else { 3 + (code & !3) };
+    if x > 223 || y > 223 {
+        return None;
+    }
+    Some(vec![
+        0x1b,
+        b'[',
+        b'M',
+        32 + code as u8,
+        32 + x as u8,
+        32 + y as u8,
+    ])
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -562,6 +657,41 @@ mod test {
 
     fn encode(key: &str) -> Vec<u8> {
         encode_key(&KeyEvent::from_str(key).unwrap(), false).unwrap()
+    }
+
+    #[test]
+    fn encodes_mouse() {
+        let mouse = |kind| MouseEvent {
+            kind,
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::NONE,
+        };
+        let sgr = TermMode::SGR_MOUSE | TermMode::MOUSE_REPORT_CLICK;
+        assert_eq!(
+            encode_mouse(&mouse(MouseEventKind::ScrollUp), 9, 4, sgr).unwrap(),
+            b"\x1b[<64;10;5M"
+        );
+        assert_eq!(
+            encode_mouse(&mouse(MouseEventKind::ScrollDown), 0, 0, sgr).unwrap(),
+            b"\x1b[<65;1;1M"
+        );
+        assert_eq!(
+            encode_mouse(&mouse(MouseEventKind::Up(MouseButton::Left)), 0, 0, sgr).unwrap(),
+            b"\x1b[<0;1;1m"
+        );
+        // Motion is only reported in motion mode.
+        assert!(encode_mouse(&mouse(MouseEventKind::Moved), 0, 0, sgr).is_none());
+        assert_eq!(
+            encode_mouse(
+                &mouse(MouseEventKind::Down(MouseButton::Left)),
+                0,
+                0,
+                TermMode::MOUSE_REPORT_CLICK
+            )
+            .unwrap(),
+            [0x1b, b'[', b'M', 32, 33, 33]
+        );
     }
 
     #[test]
