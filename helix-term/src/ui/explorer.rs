@@ -10,6 +10,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use anyhow::bail;
@@ -19,7 +20,6 @@ use helix_view::editor::Action;
 use helix_view::graphics::{Modifier, Rect, Style};
 use helix_view::input::{KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use helix_view::{current_ref, doc, DocumentId, Editor, ViewId};
-use ignore::WalkBuilder;
 use tui::buffer::Buffer as Surface;
 
 use crate::commands;
@@ -29,7 +29,10 @@ use crate::keymap::{KeyTrie, KeyTrieNode, Keymaps};
 use crate::ui::{self, EditorView, PromptEvent};
 use crate::{ctrl, key};
 
+mod gitignore;
 mod icons;
+
+use gitignore::{DirRules, Matcher, Outer};
 
 const HELP: &str = "a: new (end with / for a directory)  r: rename  x: cut  p: paste  d: delete  \
                     R: refresh  H: show/hide git ignored  q: close  esc: back to the editor";
@@ -50,6 +53,8 @@ pub struct Explorer {
     nodes: Vec<Node>,
     /// Listed directories, so expanding or collapsing one doesn't read the others again.
     listings: Listings,
+    /// Git's ignore rules from outside the tree.
+    outer: Outer,
     expanded: HashSet<PathBuf>,
     cursor: usize,
     scroll: usize,
@@ -94,6 +99,7 @@ impl Explorer {
 
     fn empty(root: PathBuf) -> Self {
         Self {
+            outer: Outer::read(&root),
             root,
             nodes: Vec::new(),
             listings: HashMap::new(),
@@ -172,6 +178,7 @@ impl Explorer {
         let cwd = helix_stdx::env::current_working_dir();
         if cwd != self.root {
             self.root = cwd;
+            self.outer = Outer::read(&self.root);
             self.expanded.clear();
             self.listings.clear();
             self.cursor = 0;
@@ -185,6 +192,7 @@ impl Explorer {
     /// Reads every directory again, for the changes `refresh` can't see (global git excludes,
     /// coarse modification times).
     fn reload(&mut self, editor: &Editor) {
+        self.outer = Outer::read(&self.root);
         self.listings.clear();
         self.refresh(editor);
     }
@@ -196,7 +204,12 @@ impl Explorer {
         // changes on every refresh.
         self.listings
             .retain(|dir, _| *dir == self.root || self.expanded.contains(dir));
-        self.nodes = build_tree(&self.root, &self.expanded, self.hiding, &mut self.listings);
+        let mut lister = Lister {
+            root: &self.root,
+            outer: &self.outer,
+            listings: &mut self.listings,
+        };
+        self.nodes = lister.tree(&self.expanded, self.hiding);
         self.cursor = self.cursor.min(self.nodes.len().saturating_sub(1));
         if let Some(path) = selected {
             self.select(&path);
@@ -218,12 +231,18 @@ impl Explorer {
         let Ok(relative) = parent.strip_prefix(&self.root) else {
             return;
         };
+        let mut lister = Lister {
+            root: &self.root,
+            outer: &self.outer,
+            listings: &mut self.listings,
+        };
         let mut dirs = Vec::new();
         let mut dir = self.root.clone();
         let mut dir_ignored = false;
         for component in relative.components() {
             let child = dir.join(component);
-            let entry = listing(&mut self.listings, &dir, dir_ignored)
+            let entry = lister
+                .listing(&dir, dir_ignored)
                 .entries
                 .iter()
                 .find(|entry| entry.path == child);
@@ -880,6 +899,8 @@ struct Listing {
     listed_at: SystemTime,
     /// Whether the directory itself was ignored, which makes all its entries ignored.
     dir_ignored: bool,
+    /// The directory's own ignore rules, for listing the directories below it.
+    rules: Arc<DirRules>,
     entries: Vec<Node>,
 }
 
@@ -921,93 +942,96 @@ fn drop_changed_listings(listings: &mut Listings) {
     }
 }
 
-fn build_tree(
-    root: &Path,
-    expanded: &HashSet<PathBuf>,
-    hide_ignored: bool,
-    listings: &mut Listings,
-) -> Vec<Node> {
-    let mut nodes = Vec::new();
-    push_children(root, 0, false, expanded, hide_ignored, listings, &mut nodes);
-    nodes
+/// Reads directories into `listings`, with the ignore rules of the tree rooted at `root`.
+struct Lister<'a> {
+    root: &'a Path,
+    outer: &'a Outer,
+    listings: &'a mut Listings,
 }
 
-fn push_children(
-    dir: &Path,
-    depth: usize,
-    dir_ignored: bool,
-    expanded: &HashSet<PathBuf>,
-    hide_ignored: bool,
-    listings: &mut Listings,
-    nodes: &mut Vec<Node>,
-) {
-    let entries: Vec<Node> = listing(listings, dir, dir_ignored)
-        .entries
-        .iter()
-        .filter(|entry| !(hide_ignored && entry.ignored))
-        .cloned()
-        .collect();
-    for mut node in entries {
-        node.depth = depth;
-        let path = node.path.clone();
-        let ignored = node.ignored;
-        let expand = node.is_dir && expanded.contains(&path);
-        nodes.push(node);
-        if expand {
-            push_children(
-                &path,
-                depth + 1,
-                ignored,
-                expanded,
-                hide_ignored,
-                listings,
-                nodes,
-            );
+impl Lister<'_> {
+    /// The visible tree: the entries of the root, and of the `expanded` directories below them.
+    fn tree(&mut self, expanded: &HashSet<PathBuf>, hide_ignored: bool) -> Vec<Node> {
+        let mut nodes = Vec::new();
+        let root = self.root;
+        self.push_children(root, 0, false, expanded, hide_ignored, &mut nodes);
+        nodes
+    }
+
+    fn push_children(
+        &mut self,
+        dir: &Path,
+        depth: usize,
+        dir_ignored: bool,
+        expanded: &HashSet<PathBuf>,
+        hide_ignored: bool,
+        nodes: &mut Vec<Node>,
+    ) {
+        let entries: Vec<Node> = self
+            .listing(dir, dir_ignored)
+            .entries
+            .iter()
+            .filter(|entry| !(hide_ignored && entry.ignored))
+            .cloned()
+            .collect();
+        for mut node in entries {
+            node.depth = depth;
+            let path = node.path.clone();
+            let ignored = node.ignored;
+            let expand = node.is_dir && expanded.contains(&path);
+            nodes.push(node);
+            if expand {
+                self.push_children(&path, depth + 1, ignored, expanded, hide_ignored, nodes);
+            }
         }
     }
-}
 
-/// The listing of `dir`, read from disk unless it is already there.
-fn listing<'a>(listings: &'a mut Listings, dir: &Path, dir_ignored: bool) -> &'a Listing {
-    let listed = listings
-        .get(dir)
-        .is_some_and(|listing| listing.dir_ignored == dir_ignored);
-    if !listed {
-        let listing = Listing {
-            stamp: stamp(dir),
-            listed_at: SystemTime::now(),
-            dir_ignored,
-            entries: list_dir(dir, dir_ignored),
-        };
-        listings.insert(dir.to_path_buf(), listing);
+    /// The listing of `dir`, read from disk unless it is already there. The directories above it
+    /// up to the root are expected to be listed already, for their ignore rules.
+    fn listing(&mut self, dir: &Path, dir_ignored: bool) -> &Listing {
+        let listed = self
+            .listings
+            .get(dir)
+            .is_some_and(|listing| listing.dir_ignored == dir_ignored);
+        if !listed {
+            let stamp = stamp(dir);
+            let listed_at = SystemTime::now();
+            // Everything inside an ignored directory is ignored, its rules don't matter.
+            let (rules, entries) = if dir_ignored {
+                (Arc::default(), list_dir(dir, None))
+            } else {
+                let rules = DirRules::read(dir);
+                let mut chain = vec![rules.clone()];
+                chain.extend(
+                    dir.ancestors()
+                        .skip(1)
+                        .take_while(|parent| parent.starts_with(self.root))
+                        .map(|parent| match self.listings.get(parent) {
+                            Some(listing) => listing.rules.clone(),
+                            None => DirRules::read(parent),
+                        }),
+                );
+                let entries = list_dir(dir, Some(&Matcher::new(&chain, self.outer)));
+                (rules, entries)
+            };
+            let listing = Listing {
+                stamp,
+                listed_at,
+                dir_ignored,
+                rules,
+                entries,
+            };
+            self.listings.insert(dir.to_path_buf(), listing);
+        }
+        &self.listings[dir]
     }
-    &listings[dir]
 }
 
-/// Entries of `dir`, directories first. Everything inside an ignored directory is ignored too.
-fn list_dir(dir: &Path, dir_ignored: bool) -> Vec<Node> {
+/// Entries of `dir`, directories first. Without a `matcher`, the directory is ignored by git, and
+/// so is everything inside it.
+fn list_dir(dir: &Path, matcher: Option<&Matcher>) -> Vec<Node> {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return Vec::new();
-    };
-    // Listing the directory again with git's ignore rules applied tells which entries git ignores.
-    // This follows nested `.gitignore` files, the ones of parent directories, `.git/info/exclude`
-    // and the global excludes file.
-    let not_ignored: HashSet<PathBuf> = if dir_ignored {
-        HashSet::new()
-    } else {
-        WalkBuilder::new(dir)
-            .max_depth(Some(1))
-            .hidden(false)
-            .ignore(false)
-            .parents(true)
-            .git_ignore(true)
-            .git_global(true)
-            .git_exclude(true)
-            .build()
-            .filter_map(Result::ok)
-            .filter(|entry| entry.depth() == 1)
-            .map(|entry| entry.into_path())
-            .collect()
     };
     let mut nodes: Vec<Node> = entries
         .filter_map(Result::ok)
@@ -1019,26 +1043,172 @@ fn list_dir(dir: &Path, dir_ignored: bool) -> Vec<Node> {
                 Ok(file_type) if !file_type.is_symlink() => file_type.is_dir(),
                 _ => path.is_dir(),
             };
+            let ignored = matcher.is_none_or(|matcher| matcher.is_ignored(&path, is_dir));
             Node {
                 name: entry.file_name().to_string_lossy().into_owned(),
                 is_dir,
-                ignored: dir_ignored || !not_ignored.contains(&path),
+                ignored,
                 depth: 0,
                 path,
             }
         })
         .collect();
-    nodes.sort_by(|a, b| {
-        b.is_dir
-            .cmp(&a.is_dir)
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
+    // Lowercasing once per entry, not once per comparison.
+    nodes.sort_by_cached_key(|node| (!node.is_dir, node.name.to_lowercase()));
     nodes
+}
+
+// See `benches/explorer.rs`.
+#[cfg(feature = "bench")]
+pub mod bench {
+    use std::path::{Path, PathBuf};
+
+    use super::Explorer;
+
+    /// A panel with some directories expanded.
+    pub struct Tree(Explorer);
+
+    impl Tree {
+        pub fn new(root: &Path, expanded: &[PathBuf]) -> Self {
+            let mut explorer = Explorer::empty(root.to_path_buf());
+            explorer.expanded.extend(expanded.iter().cloned());
+            explorer.rebuild();
+            Self(explorer)
+        }
+
+        /// Lists `dir` again, like expanding it. The directories above it are expected to be
+        /// expanded.
+        pub fn list(&mut self, dir: &Path) -> usize {
+            let explorer = &mut self.0;
+            explorer.listings.remove(dir);
+            let mut lister = super::Lister {
+                root: &explorer.root,
+                outer: &explorer.outer,
+                listings: &mut explorer.listings,
+            };
+            lister.listing(dir, false).entries.len()
+        }
+
+        /// What `Explorer::refresh` does, without an editor for the config.
+        pub fn refresh(&mut self) -> usize {
+            super::drop_changed_listings(&mut self.0.listings);
+            self.0.rebuild();
+            self.0.nodes.len()
+        }
+
+        /// Reads every directory again, like `R`.
+        pub fn reload(&mut self) -> usize {
+            self.0.listings.clear();
+            self.refresh()
+        }
+    }
+
+    /// Opens a panel on `root` and reveals `path`, like `space E` does for the current buffer.
+    pub fn reveal(root: &Path, path: &Path) -> usize {
+        let mut explorer = Explorer::empty(root.to_path_buf());
+        explorer.rebuild();
+        explorer.reveal(path, false);
+        explorer.nodes.len()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn build_tree(
+        root: &Path,
+        expanded: &HashSet<PathBuf>,
+        hide_ignored: bool,
+        listings: &mut Listings,
+    ) -> Vec<Node> {
+        let outer = Outer::read(root);
+        let mut lister = Lister {
+            root,
+            outer: &outer,
+            listings,
+        };
+        lister.tree(expanded, hide_ignored)
+    }
+
+    /// The ignored entries of `dir`, the way the `ignore` crate tells them.
+    fn ignored_by_walk(dir: &Path) -> HashSet<PathBuf> {
+        let not_ignored: HashSet<PathBuf> = ignore::WalkBuilder::new(dir)
+            .max_depth(Some(1))
+            .hidden(false)
+            .ignore(false)
+            .parents(true)
+            .git_ignore(true)
+            .git_global(true)
+            .git_exclude(true)
+            .build()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.depth() == 1)
+            .map(|entry| entry.into_path())
+            .collect();
+        std::fs::read_dir(dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| !not_ignored.contains(path) && !path.ends_with(".git"))
+            .collect()
+    }
+
+    #[test]
+    fn ignores_what_the_ignore_crate_ignores() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = dir.path().join("repo");
+        let write = |path: &str, contents: &str| {
+            let path = repo.join(path);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, contents).unwrap();
+        };
+        write(".git/info/exclude", "excluded.txt\n");
+        write(".gitignore", "*.log\n/build\nonly_dir/\n!keep.log\n");
+        write("a.log", "");
+        write("keep.log", "");
+        write("excluded.txt", "");
+        write("build/out", "");
+        write("only_dir", "");
+        write("src/build/out", "");
+        write("src/only_dir/x", "");
+        write("src/.gitignore", "!b.log\ngenerated.rs\n");
+        write("src/b.log", "");
+        write("src/c.log", "");
+        write("src/generated.rs", "");
+        write("src/main.rs", "");
+        write("src/deep/.gitignore", "*.rs\n");
+        write("src/deep/lib.rs", "");
+        write("src/deep/d.log", "");
+        // A repository of its own: the outer rules stop at it.
+        write("nested/.git/info/exclude", "");
+        write("nested/a.log", "");
+        write("nested/generated.rs", "");
+
+        // From the root of the repository, and from a directory below it.
+        for root in [repo.clone(), repo.join("src")] {
+            let expanded: HashSet<PathBuf> =
+                ["src", "src/build", "src/only_dir", "src/deep", "nested"]
+                    .iter()
+                    .map(|path| repo.join(path))
+                    .filter(|path| path.starts_with(&root))
+                    .collect();
+            let mut listings = HashMap::new();
+            build_tree(&root, &expanded, false, &mut listings);
+            for dir in std::iter::once(&root).chain(&expanded) {
+                let listing = &listings[dir];
+                if listing.dir_ignored {
+                    continue;
+                }
+                let ignored: HashSet<PathBuf> = listing
+                    .entries
+                    .iter()
+                    .filter(|node| node.ignored)
+                    .map(|node| node.path.clone())
+                    .collect();
+                assert_eq!(ignored, ignored_by_walk(dir), "in {}", dir.display());
+            }
+        }
+    }
 
     fn names(nodes: &[Node]) -> Vec<(String, bool)> {
         nodes
