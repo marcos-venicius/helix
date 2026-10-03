@@ -356,7 +356,15 @@ impl Explorer {
         let Some(name) = cut.file_name() else {
             bail!("can't move {}", cut.display());
         };
-        let new = move_entry(editor, &cut, &self.target_dir().join(name))?;
+        let new = match move_entry(editor, &cut, &self.target_dir().join(name)) {
+            Ok(new) => new,
+            Err(err) => {
+                if cut.symlink_metadata().is_err() {
+                    self.cut = None;
+                }
+                return Err(err);
+            }
+        };
         self.cut = None;
         self.refresh(editor);
         self.reveal(&new);
@@ -561,12 +569,23 @@ fn move_entry(editor: &mut Editor, old: &Path, new: &Path) -> anyhow::Result<Pat
     if old == new {
         return Ok(new);
     }
-    if new.exists() {
+    // `Editor::move_path` quietly does nothing when `old` is gone.
+    if old.symlink_metadata().is_err() {
+        bail!("{} no longer exists", old.display());
+    }
+    if new.symlink_metadata().is_ok() {
         bail!("{} already exists", new.display());
     }
     if new.starts_with(old) {
         bail!("can't move a directory into itself");
     }
+    // Missing parent directories, deepest first, removed again if the move fails.
+    let created: Vec<PathBuf> = new
+        .ancestors()
+        .skip(1)
+        .take_while(|dir| !dir.exists())
+        .map(Path::to_path_buf)
+        .collect();
     if let Some(parent) = new.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -582,7 +601,12 @@ fn move_entry(editor: &mut Editor, old: &Path, new: &Path) -> anyhow::Result<Pat
     } else {
         Vec::new()
     };
-    editor.move_path(old, &new)?;
+    if let Err(err) = editor.move_path(old, &new) {
+        for dir in created {
+            let _ = std::fs::remove_dir(dir);
+        }
+        return Err(err.into());
+    }
     for (id, path) in inside {
         editor.set_doc_path(id, &path);
     }
