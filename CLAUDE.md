@@ -14,6 +14,7 @@ code lives:
 | Claude Code popup | `helix-term/src/ui/claude.rs`, `helix-term/src/commands/claude.rs` |
 | Side by side git diff | `helix-term/src/ui/diff_view.rs`, `helix-term/src/commands/diff_view.rs` |
 | Staged files in the changed files picker | `status()` and its helpers in `helix-vcs/src/git.rs`, `FileChange::Added` in `helix-vcs/src/status.rs` |
+| File explorer side panel | `helix-term/src/ui/explorer.rs`; hooks in `EditorView` (`helix-term/src/ui/editor.rs`), `ExplorerConfig` in `helix-view/src/editor.rs` |
 
 ## Branches
 
@@ -76,6 +77,11 @@ the same spots:
 - `helix-term/src/ui/picker.rs`: we add a generic `with_key_handler` (a `key_handlers` field, its
   builder and a check at the top of the key match in `handle_event`). Keep upstream's version and
   re-add those pieces; `changed_file_picker` in `helix-term/src/commands.rs` uses it for `C-g`.
+- `helix-term/src/ui/editor.rs`: `EditorView` has an `explorer` field. `render` clips the
+  explorer's width off the editor area before `cx.editor.resize` and renders it after the views,
+  `handle_event` hands it keys (the `explorer_takes_key` check before `on_next_key`) and mouse
+  events, and `cursor` hides the cursor while it's focused. Keep upstream's version and re-add those
+  pieces.
 - `helix-vcs/src/git.rs`: `status()` is rewritten to also list staged changes (`into_iter` instead of
   `into_index_worktree_iter`, merging both kinds of change per file), and `FileChange` has an extra
   `Added` variant. If upstream changes `status()`, port their change onto our version and run

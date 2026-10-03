@@ -266,6 +266,24 @@ impl Default for FileExplorerConfig {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case", default, deny_unknown_fields)]
+pub struct ExplorerConfig {
+    /// Width of the side panel, in columns. Defaults to 30.
+    pub width: u16,
+    /// Hide files and directories ignored by git instead of dimming them. Defaults to false.
+    pub hide_gitignored: bool,
+}
+
+impl Default for ExplorerConfig {
+    fn default() -> Self {
+        Self {
+            width: 30,
+            hide_gitignored: false,
+        }
+    }
+}
+
 fn serialize_alphabet<S>(alphabet: &[char], serializer: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
@@ -366,6 +384,8 @@ pub struct Config {
     pub auto_info: bool,
     pub file_picker: FilePickerConfig,
     pub file_explorer: FileExplorerConfig,
+    /// Side panel with a file tree, toggled with `space E` (fork feature).
+    pub explorer: ExplorerConfig,
     /// Configuration of the statusline elements
     pub statusline: StatusLineConfig,
     /// Shape for cursor in each mode
@@ -1203,6 +1223,7 @@ impl Default for Config {
             auto_info: true,
             file_picker: FilePickerConfig::default(),
             file_explorer: FileExplorerConfig::default(),
+            explorer: ExplorerConfig::default(),
             statusline: StatusLineConfig::default(),
             cursor_shape: CursorShapeConfig::default(),
             true_color: false,

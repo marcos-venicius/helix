@@ -8,6 +8,7 @@ as in the [Helix documentation](https://docs.helix-editor.com/).
 - [Claude Code popup](#claude-code-popup)
 - [Side by side git diff](#side-by-side-git-diff)
 - [Staged files in the changed files picker](#staged-files-in-the-changed-files-picker)
+- [File explorer side panel](#file-explorer-side-panel)
 
 To build and install the fork, from the `marcos` branch:
 
@@ -120,3 +121,71 @@ as soon as they are `git add`ed. In this fork it lists every change compared to 
 - staged renames (`git mv`) are listed as renamed;
 - a file that is staged and then changed again is listed once;
 - a file that is added and then deleted from disk is not listed, since it matches HEAD again.
+
+## File explorer side panel
+
+A file tree in a panel on the left of the editor, rooted at the working directory. The editor area
+shrinks to make room for it. Files and directories ignored by git (`.gitignore` files, including
+nested ones and the ones of parent directories, `.git/info/exclude` and the global excludes file)
+are shown dimmed instead of hidden. The `.git` directory is never listed.
+
+Not to be confused with upstream's `space e`, which opens the file explorer picker.
+
+### Usage
+
+| Keys | Action |
+| --- | --- |
+| `space E` | Open and focus the panel. With the panel open, focus it, or close it when it is already focused. |
+| `j`/`k`, arrows | Move. `C-d`/`C-u` move half a page, `g`/`G` go to the top/bottom. |
+| `l`, `Right` | Expand a directory (or move into an expanded one), open a file. |
+| `h`, `Left` | Collapse a directory, or go to the parent directory. |
+| `Enter`, mouse click | Expand/collapse a directory, open a file. |
+| `a` | Create a file in the selected directory (or next to the selected file). Missing parent directories are created, and a name ending in `/` creates a directory. |
+| `r` | Rename. The new name may contain `/` to move the entry to a subdirectory. |
+| `x`, then `p` | Cut the selected entry, then move it into the selected directory (or next to the selected file). |
+| `d`, then `y` | Delete the selected file or directory (directories are deleted recursively). |
+| `R` | Reload the tree from disk. |
+| `H` | Show/hide git ignored files for this session. |
+| `?` | Show the keys in the status line. |
+| `Esc` | Give the focus back to the editor. |
+| `q` | Close the panel. |
+
+`space` and `:` keep working while the panel is focused, so the pickers and commands are available.
+Opening a file focuses the editor and shows the file in the current view. Clicking in the editor
+also gives the focus back to it.
+
+Renames, moves, creations and deletions go through the same code as `:move`, so language servers
+are notified (`willRename`, `didCreate`, ...). Open buffers follow renamed and moved files,
+including files inside a moved directory. Deleting a file closes its buffers, and deleting is
+refused when one of them has unsaved changes. Moves and renames never overwrite an existing file.
+
+The panel is reloaded from disk when it gets the focus, after each operation and with `R`. When the
+working directory changes (`:cd`), the tree follows it on the next reload.
+
+### Configuration
+
+```toml
+[editor.explorer]
+width = 30               # columns, at most half of the screen
+hide-gitignored = false  # hide git ignored files instead of dimming them
+```
+
+Theme scopes: `ui.explorer` (background, defaults to `ui.background`), `ui.explorer.ignored`
+(ignored entries, defaults to `ui.text.inactive`, or dim text), `ui.text.directory` (directories),
+`ui.selection` (selected entry while focused), `ui.cursorline.primary` (selected entry while not
+focused) and `ui.window` (separator).
+
+### Limitations
+
+- The tree doesn't watch the disk: files created outside the panel show up on the next reload
+  (focusing the panel or `R`).
+- One entry at a time: there is no multi-selection for moving or deleting several files.
+- Deleting is permanent, there is no trash.
+- Copying files isn't supported, only moving.
+
+### Ideas
+
+- Copy and paste (`c`/`p`), and a multi-selection for batch moves and deletions.
+- Git status markers (modified, added, untracked) next to the entries.
+- Highlighting (and auto-revealing) the file of the current buffer as the focus changes.
+- File type icons.

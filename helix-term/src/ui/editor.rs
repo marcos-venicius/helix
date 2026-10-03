@@ -7,6 +7,7 @@ use crate::{
     keymap::{KeymapResult, Keymaps},
     ui::{
         document::{render_document, LinePos, TextRenderer},
+        explorer::Explorer,
         statusline,
         text_decorations::{self, Decoration, DecorationManager, InlineDiagnostics},
         Completion, ProgressSpinners,
@@ -44,6 +45,8 @@ pub struct EditorView {
     spinners: ProgressSpinners,
     /// Tracks if the terminal window is focused by reaction to terminal focus events
     terminal_focused: bool,
+    /// File tree side panel, toggled with `space E`.
+    pub explorer: Option<Explorer>,
 }
 
 #[derive(Debug, Clone)]
@@ -67,6 +70,7 @@ impl EditorView {
             completion: None,
             spinners: ProgressSpinners::default(),
             terminal_focused: true,
+            explorer: None,
         }
     }
 
@@ -1495,7 +1499,18 @@ impl Component for EditorView {
 
                 let mode = cx.editor.mode();
 
-                if !self.on_next_key(OnKeyCallbackKind::PseudoPending, &mut cx, key) {
+                let explorer_takes_key = self.keymaps.pending().is_empty()
+                    && self.on_next_key.is_none()
+                    && self
+                        .explorer
+                        .as_ref()
+                        .is_some_and(|explorer| explorer.takes_key(key, mode));
+                if explorer_takes_key {
+                    let explorer = self.explorer.as_mut().unwrap();
+                    if !explorer.handle_key(key, &mut cx) {
+                        self.explorer = None;
+                    }
+                } else if !self.on_next_key(OnKeyCallbackKind::PseudoPending, &mut cx, key) {
                     match mode {
                         Mode::Insert => {
                             // let completion swallow the event if necessary
@@ -1591,7 +1606,18 @@ impl Component for EditorView {
                 EventResult::Consumed(callback)
             }
 
-            Event::Mouse(event) => self.handle_mouse_event(event, &mut cx),
+            Event::Mouse(event) => {
+                if let Some(explorer) = &mut self.explorer {
+                    if explorer.contains(event.column, event.row) {
+                        explorer.handle_mouse(event, cx.editor);
+                        return EventResult::Consumed(None);
+                    }
+                    if matches!(event.kind, MouseEventKind::Down(_)) {
+                        explorer.unfocus();
+                    }
+                }
+                self.handle_mouse_event(event, &mut cx)
+            }
             Event::IdleTimeout => self.handle_idle_timeout(&mut cx),
             Event::FocusGained => {
                 self.terminal_focused = true;
@@ -1634,6 +1660,13 @@ impl Component for EditorView {
             editor_area = editor_area.clip_top(1);
         }
 
+        let explorer_area = self.explorer.as_ref().map(|explorer| {
+            let explorer_area =
+                editor_area.with_width(explorer.width(cx.editor, editor_area.width));
+            editor_area = editor_area.clip_left(explorer_area.width);
+            explorer_area
+        });
+
         // if the terminal size suddenly changed, we need to trigger a resize
         cx.editor.resize(editor_area);
 
@@ -1641,9 +1674,15 @@ impl Component for EditorView {
             Self::render_bufferline(cx.editor, area.with_height(1), surface);
         }
 
+        let explorer_focused = self.explorer.as_ref().is_some_and(Explorer::is_focused);
         for (view, is_focused) in cx.editor.tree.views() {
             let doc = cx.editor.document(view.doc).unwrap();
+            let is_focused = is_focused && !explorer_focused;
             self.render_view(cx.editor, doc, view, area, surface, is_focused);
+        }
+
+        if let (Some(explorer), Some(explorer_area)) = (&mut self.explorer, explorer_area) {
+            explorer.render(explorer_area, surface, cx.editor);
         }
 
         if config.auto_info {
@@ -1735,6 +1774,9 @@ impl Component for EditorView {
     }
 
     fn cursor(&self, _area: Rect, editor: &Editor) -> (Option<Position>, CursorKind) {
+        if self.explorer.as_ref().is_some_and(Explorer::is_focused) {
+            return (None, CursorKind::Hidden);
+        }
         match editor.cursor() {
             // all block cursors are drawn manually
             (pos, CursorKind::Block) => {
