@@ -129,6 +129,10 @@ shrinks to make room for it. Files and directories ignored by git (`.gitignore` 
 nested ones and the ones of parent directories, `.git/info/exclude` and the global excludes file)
 are shown dimmed instead of hidden. The `.git` directory is never listed.
 
+Entries have file type icons (Nerd Font glyphs, colored by type), and the file of the current buffer
+is shown in bold. While the panel isn't focused, it follows the current buffer: switching to another
+file (a picker, `:open`, `gd`, ...) expands the tree down to it and selects it.
+
 Not to be confused with upstream's `space e`, which opens the file explorer picker.
 
 ### Usage
@@ -175,6 +179,8 @@ changes (`:cd`), the tree follows it on the next update.
 [editor.explorer]
 width = 30               # columns, at most half of the screen
 hide-gitignored = false  # hide git ignored files instead of dimming them
+icons = true             # file type icons; needs a Nerd Font, turn off otherwise
+auto-reveal = true       # follow the current buffer while the panel isn't focused
 ```
 
 Theme scopes: `ui.explorer` (background, defaults to `ui.background`), `ui.explorer.ignored`
@@ -191,10 +197,11 @@ focused) and `ui.window` (separator).
 - One entry at a time: there is no multi-selection for moving or deleting several files.
 - Deleting is permanent, there is no trash.
 - Copying files isn't supported, only moving.
+- Icons need a terminal font patched with [Nerd Fonts](https://www.nerdfonts.com/); without one
+  they show as boxes, so set `icons = false`. Their colors are fixed, not taken from the theme, and
+  file types without a known icon get a generic file icon.
 
 ### Ideas
 
 - Copy and paste (`c`/`p`), and a multi-selection for batch moves and deletions.
 - Git status markers (modified, added, untracked) next to the entries.
-- Highlighting (and auto-revealing) the file of the current buffer as the focus changes.
-- File type icons.
