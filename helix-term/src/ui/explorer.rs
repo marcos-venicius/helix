@@ -416,14 +416,20 @@ impl Explorer {
             MouseEventKind::ScrollDown => self.move_cursor(3),
             MouseEventKind::ScrollUp => self.move_cursor(-3),
             MouseEventKind::Down(MouseButton::Left) => {
+                // Find the clicked entry in what is on screen, before `focus` reloads the tree and
+                // possibly shifts the rows.
+                let clicked = (self.body.top()..self.body.bottom())
+                    .contains(&event.row)
+                    .then(|| self.scroll + (event.row - self.body.top()) as usize)
+                    .and_then(|index| self.nodes.get(index))
+                    .map(|node| node.path.clone());
                 if !self.focused {
                     self.focus(editor);
                 }
-                if event.row < self.body.top() || event.row >= self.body.bottom() {
+                let Some(path) = clicked else {
                     return;
-                }
-                let index = self.scroll + (event.row - self.body.top()) as usize;
-                if index < self.nodes.len() {
+                };
+                if let Some(index) = self.nodes.iter().position(|node| node.path == path) {
                     self.cursor = index;
                     self.activate(editor);
                 }
