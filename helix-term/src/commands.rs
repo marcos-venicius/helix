@@ -609,6 +609,7 @@ impl MappableCommand {
         claude_code, "Toggle the Claude Code popup (starts a session with file/selection context)",
         claude_session_picker, "Open Claude Code session picker",
         git_diff_view, "Open a side by side git diff of the current file",
+        toggle_explorer, "Toggle the file explorer side panel",
         rename_symbol, "Rename symbol",
         increment, "Increment item under cursor",
         decrement, "Decrement item under cursor",
@@ -5950,7 +5951,9 @@ fn jump_view_right(cx: &mut Context) {
 }
 
 fn jump_view_left(cx: &mut Context) {
-    cx.editor.focus_direction(tree::Direction::Left)
+    if !ui::explorer::jump_left(cx) {
+        cx.editor.focus_direction(tree::Direction::Left)
+    }
 }
 
 fn jump_view_up(cx: &mut Context) {
@@ -6779,6 +6782,14 @@ fn claude_code(cx: &mut Context) {
 fn git_diff_view(cx: &mut Context) {
     cx.callback.push(Box::new(|compositor, cx| {
         diff_view::open_current(cx.editor, compositor)
+    }));
+}
+
+fn toggle_explorer(cx: &mut Context) {
+    cx.callback.push(Box::new(|compositor, cx| {
+        if let Some(editor_view) = compositor.find::<ui::EditorView>() {
+            ui::explorer::toggle(editor_view, cx.editor)
+        }
     }));
 }
 

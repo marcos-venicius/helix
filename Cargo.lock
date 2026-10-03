@@ -1732,6 +1732,7 @@ dependencies = [
  "alacritty_terminal",
  "anyhow",
  "arc-swap",
+ "criterion",
  "crossterm",
  "dashmap",
  "futures-util",

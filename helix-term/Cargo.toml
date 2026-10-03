@@ -35,6 +35,8 @@ default = ["git"]
 unicode-lines = ["helix-core/unicode-lines", "helix-view/unicode-lines"]
 integration = ["helix-event/integration_test"]
 git = ["helix-vcs/git"]
+# Exposes internals. Should not be enabled except for benchmarking.
+bench = []
 
 [[bin]]
 name = "hx"
@@ -105,3 +107,10 @@ smallvec = "1.15"
 indoc = "2.0.6"
 tempfile.workspace = true
 same-file = "1.0.1"
+criterion.workspace = true
+
+# cargo bench -p helix-term --features bench --bench explorer
+[[bench]]
+name = "explorer"
+harness = false
+required-features = ["bench"]

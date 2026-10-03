@@ -14,6 +14,7 @@ code lives:
 | Claude Code popup | `helix-term/src/ui/claude.rs`, `helix-term/src/commands/claude.rs` |
 | Side by side git diff | `helix-term/src/ui/diff_view.rs`, `helix-term/src/commands/diff_view.rs` |
 | Staged files in the changed files picker | `status()` and its helpers in `helix-vcs/src/git.rs`, `FileChange::Added` in `helix-vcs/src/status.rs` |
+| File explorer side panel | `helix-term/src/ui/explorer.rs` and `helix-term/src/ui/explorer/` (icons, git ignore rules); hooks in `EditorView` (`helix-term/src/ui/editor.rs`), `ExplorerConfig` in `helix-view/src/editor.rs`; benchmarks in `helix-term/benches/explorer.rs` |
 
 ## Branches
 
@@ -71,15 +72,26 @@ Our features keep upstream files mostly untouched: the logic lives in new files 
 [Fork features](#fork-features)), and upstream files only get small hooks. When upstream touches
 the same spots:
 
+- `jump_view_left` in `helix-term/src/commands.rs` first calls `ui::explorer::jump_left`, which
+  focuses the explorer from the leftmost view. Keep upstream's version and re-add that check.
 - `helix-term/src/keymap/default.rs`, the `static_commands!` list in `helix-term/src/commands.rs`,
   `TYPABLE_COMMAND_LIST` in `helix-term/src/commands/typed.rs`: usually keep both sides.
 - `helix-term/src/ui/picker.rs`: we add a generic `with_key_handler` (a `key_handlers` field, its
   builder and a check at the top of the key match in `handle_event`). Keep upstream's version and
   re-add those pieces; `changed_file_picker` in `helix-term/src/commands.rs` uses it for `C-g`.
+- `helix-term/src/ui/editor.rs`: `EditorView` has an `explorer` field. `render` clips the
+  explorer's width off the editor area before `cx.editor.resize`, calls `explorer.update` before
+  drawing the views (unfocusing them while the explorer has the focus) and renders it after them.
+  `handle_event` drops pastes while it's focused, offers it each key first (`explorer_key`, before
+  `on_next_key`, with `&mut self.keymaps` so it can cancel pending keys) and hands it the mouse
+  events over its area (after `handle_non_key_input`). `cursor` hides the cursor while it's
+  focused. Keep upstream's version and re-add those pieces.
 - `helix-vcs/src/git.rs`: `status()` is rewritten to also list staged changes (`into_iter` instead of
   `into_index_worktree_iter`, merging both kinds of change per file), and `FileChange` has an extra
   `Added` variant. If upstream changes `status()`, port their change onto our version and run
   `cargo test -p helix-vcs --features git`, which covers the staged cases.
+- `helix-term/Cargo.toml`: we add a `bench` feature, `criterion` to the dev-dependencies and the
+  `explorer` `[[bench]]`. Keep both sides.
 - `Cargo.lock`: take upstream's version, then run `cargo build` to add our dependencies back
   (`alacritty_terminal`, `imara-diff` in `helix-term`).
 - `book/src/generated/*.md`: don't resolve by hand; take either side and run `cargo xtask docgen`.
