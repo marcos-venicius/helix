@@ -1,0 +1,409 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>marcos/helix — a personal fork of the Helix editor</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23cba6f7'/%3E%3Cg fill='none' stroke='%231e1e2e' stroke-width='2.4' stroke-linecap='round'%3E%3Ccircle cx='10' cy='8' r='2.6'/%3E%3Ccircle cx='22' cy='8' r='2.6'/%3E%3Ccircle cx='16' cy='24.5' r='2.6'/%3E%3Cpath d='M10 10.6v2.4a4 4 0 0 0 4 4h4a4 4 0 0 0 4-4v-2.4M16 17v4.9'/%3E%3C/g%3E%3C/svg%3E">
+<meta name="description" content="A personal fork of the Helix editor: upstream Helix plus a Claude Code popup, side by side git diffs, a git commit log and a file explorer panel. Not a new editor.">
+<meta name="author" content="Marcos Sousa">
+<meta name="theme-color" content="#1e1e2e">
+<link rel="canonical" href="https://marcos-venicius.github.io/helix/">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+
+<!-- link previews (Open Graph: WhatsApp, Slack, Discord, LinkedIn, Facebook; Twitter Card: X) -->
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="marcos/helix">
+<meta property="og:title" content="marcos/helix — a personal fork of the Helix editor">
+<meta property="og:description" content="A personal fork of the Helix editor: upstream Helix plus a Claude Code popup, side by side git diffs, a git commit log and a file explorer panel. Not a new editor.">
+<meta property="og:url" content="https://marcos-venicius.github.io/helix/">
+<meta property="og:image" content="https://marcos-venicius.github.io/helix/og.jpg">
+<meta property="og:image:type" content="image/jpeg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="marcos/helix logo and title, with a side by side git diff from the editor">
+<meta property="og:locale" content="en_US">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="marcos/helix — a personal fork of the Helix editor">
+<meta name="twitter:description" content="A personal fork of the Helix editor: upstream Helix plus a Claude Code popup, side by side git diffs, a git commit log and a file explorer panel. Not a new editor.">
+<meta name="twitter:image" content="https://marcos-venicius.github.io/helix/og.jpg">
+<meta name="twitter:image:alt" content="marcos/helix logo and title, with a side by side git diff from the editor">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareSourceCode",
+  "name": "marcos/helix",
+  "description": "A personal fork of the Helix editor: upstream Helix plus a Claude Code popup, side by side git diffs, a git commit log and a file explorer panel. Not a new editor.",
+  "url": "https://marcos-venicius.github.io/helix/",
+  "codeRepository": "https://github.com/marcos-venicius/helix",
+  "programmingLanguage": "Rust",
+  "license": "https://www.mozilla.org/en-US/MPL/2.0/",
+  "isBasedOn": "https://github.com/helix-editor/helix",
+  "author": { "@type": "Person", "name": "Marcos Sousa", "url": "https://github.com/marcos-venicius" },
+  "image": "https://marcos-venicius.github.io/helix/og.jpg"
+}
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&display=swap">
+<style>
+  /* Catppuccin Mocha, the editor's theme (catppuccin_mocha) */
+  :root {
+    color-scheme: dark;
+    --bg: #1e1e2e;          /* base */
+    --surface: #181825;     /* mantle */
+    --text: #cdd6f4;        /* text */
+    --muted: #a6adc8;       /* subtext0 */
+    --border: #313244;      /* surface0 */
+    --accent: #cba6f7;      /* mauve */
+    --accent-soft: rgba(203, 166, 247, 0.12);
+    --link: #89b4fa;        /* blue */
+    --heading: #b4befe;     /* lavender */
+    --warn-bg: rgba(249, 226, 175, 0.07);
+    --warn-border: rgba(249, 226, 175, 0.35);
+    --warn-text: #f9e2af;   /* yellow */
+    --warn-body: #bac2de;   /* subtext1 */
+    --code-bg: #313244;     /* surface0 */
+    --code-text: #fab387;   /* peach */
+    --kbd-bg: #181825;      /* mantle */
+    --kbd-border: #45475a;  /* surface1 */
+    --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+  }
+  a { color: var(--link); text-underline-offset: 2px; }
+  code, kbd, pre { font-family: var(--mono); }
+  code { background: var(--code-bg); color: var(--code-text); padding: 0.1em 0.35em; border-radius: 4px; font-size: 0.9em; }
+  kbd {
+    display: inline-block;
+    background: var(--kbd-bg);
+    border: 1px solid var(--kbd-border);
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    padding: 0 0.4em;
+    font-size: 0.82em;
+    line-height: 1.6;
+    white-space: nowrap;
+  }
+
+  .wrap { max-width: 920px; margin: 0 auto; padding: 0 16px; }
+
+  header.top {
+    border-bottom: 1px solid var(--border);
+  }
+  header.top .wrap {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    min-height: 56px;
+    flex-wrap: wrap;
+  }
+  .brand { font-family: var(--mono); font-weight: 600; color: var(--text); text-decoration: none; }
+  nav.links { display: flex; gap: 18px; flex-wrap: wrap; font-size: 0.95em; }
+  nav.links a { color: var(--muted); text-decoration: none; }
+  nav.links a:hover { color: var(--accent); }
+
+  .hero { padding-top: 64px; padding-bottom: 40px; }
+  .eyebrow {
+    display: inline-block;
+    font-size: 0.8em;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: var(--accent-soft);
+    border-radius: 999px;
+    padding: 2px 12px;
+    margin-bottom: 18px;
+  }
+  .hero h1 { font-size: clamp(2rem, 5vw, 2.9rem); line-height: 1.15; margin: 0 0 18px; letter-spacing: -0.02em; }
+  .logo { flex: none; display: block; }
+  .brand { display: inline-flex; align-items: center; gap: 10px; }
+  .title-row { display: flex; align-items: center; gap: 18px; margin-bottom: 28px; }
+  .title-row h1.title {
+    font-family: var(--mono);
+    font-size: clamp(1.7rem, 5vw, 2.4rem);
+    letter-spacing: -0.03em;
+    margin: 0;
+    line-height: 1.1;
+  }
+  .title-row .tagline { margin: 6px 0 0; color: var(--muted); }
+  .hero h2.headline { font-size: clamp(1.5rem, 4vw, 2.1rem); line-height: 1.2; margin: 0 0 14px; letter-spacing: -0.02em; }
+  .hero p.lede { font-size: 1.15em; color: var(--muted); max-width: 640px; margin: 0 0 28px; }
+  .cta { display: flex; gap: 12px; flex-wrap: wrap; }
+  .btn {
+    display: inline-block;
+    padding: 10px 18px;
+    border-radius: 8px;
+    text-decoration: none;
+    font-weight: 600;
+    border: 1px solid var(--border);
+    color: var(--text);
+    background: var(--surface);
+  }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+
+  section { padding: 40px 0; border-top: 1px solid var(--border); }
+  section h2 { font-family: var(--mono); font-size: 1.4rem; margin: 0 0 8px; letter-spacing: -0.02em; color: var(--heading); }
+  section > .wrap > p.sub { color: var(--muted); margin: 0 0 28px; max-width: 680px; }
+
+  .notice {
+    background: var(--warn-bg);
+    border: 1px solid var(--warn-border);
+    color: var(--warn-text);
+    border-radius: 12px;
+    padding: 22px 24px;
+  }
+  .notice h2 { color: var(--warn-text); }
+  .notice ul { color: var(--warn-body); }
+  .notice ul { margin: 12px 0 0; padding-left: 1.2em; }
+  .notice li { margin: 8px 0; }
+  .notice li strong { color: var(--warn-text); }
+
+  .features { display: flex; flex-direction: column; gap: 56px; }
+  .feature {
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+    gap: 8px 40px;
+    align-items: start;
+  }
+  .feature h3 { font-family: var(--mono); margin: 0 0 8px; font-size: 1.1rem; color: var(--accent); }
+  .feature .text p { margin: 0; color: var(--muted); }
+  .feature .keys { display: flex; flex-direction: column; gap: 6px; font-size: 0.9em; padding-top: 4px; }
+  .feature .keys div { display: grid; grid-template-columns: 7.2em 1fr; gap: 10px; align-items: baseline; }
+  .feature .keys .k { white-space: nowrap; }
+  .feature .keys .d { color: var(--muted); }
+  .feature .shot { grid-column: 1 / -1; display: block; margin-top: 16px; }
+  .feature .shot img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 10px;
+    box-shadow: 0 12px 36px rgba(17, 17, 27, 0.6);
+  }
+  @media (max-width: 720px) {
+    .feature { grid-template-columns: 1fr; gap: 14px; }
+    .feature .shot { margin-top: 4px; }
+  }
+
+  pre {
+    background: var(--surface);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px 18px;
+    overflow-x: auto;
+    font-size: 0.9em;
+    line-height: 1.55;
+    margin: 0 0 16px;
+  }
+  pre code { background: none; color: inherit; padding: 0; border-radius: 0; font-size: inherit; }
+  .steps p { max-width: 680px; }
+
+  footer { border-top: 1px solid var(--border); padding: 28px 0 48px; color: var(--muted); font-size: 0.9em; }
+  footer p { margin: 6px 0; max-width: 720px; }
+
+  @media (max-width: 520px) {
+    .hero { padding-top: 40px; padding-bottom: 28px; }
+    .notice { padding: 18px; }
+  }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="logo" viewBox="0 0 32 32">
+    <rect width="32" height="32" rx="8" style="fill: var(--accent)"/>
+    <g style="fill: none; stroke: var(--bg); stroke-width: 2.4; stroke-linecap: round">
+      <circle cx="10" cy="8" r="2.6"/>
+      <circle cx="22" cy="8" r="2.6"/>
+      <circle cx="16" cy="24.5" r="2.6"/>
+      <path d="M10 10.6v2.4a4 4 0 0 0 4 4h4a4 4 0 0 0 4-4v-2.4M16 17v4.9"/>
+    </g>
+  </symbol>
+</svg>
+
+<header class="top">
+  <div class="wrap">
+    <a class="brand" href="#"><svg class="logo" width="26" height="26" aria-hidden="true"><use href="#logo"/></svg>marcos/helix</a>
+    <nav class="links">
+      <a href="#read-first">Read first</a>
+      <a href="#features">Features</a>
+      <a href="#install">Install</a>
+      <a href="https://github.com/marcos-venicius/helix">GitHub</a>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="wrap hero">
+    <div class="title-row">
+      <svg class="logo" width="64" height="64" role="img" aria-label="marcos/helix logo"><use href="#logo"/></svg>
+      <div>
+        <h1 class="title">marcos/helix</h1>
+        <p class="tagline">A personal fork of the Helix editor</p>
+      </div>
+    </div>
+    <h2 class="headline">Helix, customized for the way I work.</h2>
+    <p class="lede">
+      This is a fork of the <a href="https://helix-editor.com/">Helix</a> editor, not a new editor.
+      It's upstream Helix, kept in sync, plus a few features I built for my day to day as a software
+      engineer: a Claude Code popup, side by side git diffs, a commit log and a file explorer panel.
+    </p>
+    <div class="cta">
+      <a class="btn primary" href="#features">See what's added</a>
+      <a class="btn" href="https://github.com/marcos-venicius/helix/blob/marcos/FORK.md">Full docs (FORK.md)</a>
+    </div>
+  </div>
+
+  <section id="read-first">
+    <div class="wrap">
+      <div class="notice">
+        <h2>Read this first</h2>
+        <ul>
+          <li><strong>It's a fork, not a new editor.</strong> Everything that isn't listed on this page
+            is plain Helix and works exactly as described in the
+            <a href="https://docs.helix-editor.com/">Helix documentation</a>.</li>
+          <li><strong>It's a personal build.</strong> It grows with what I need in my daily work, not
+            with a roadmap. Features are added when I need them, and shaped by how I use them.</li>
+          <li><strong>It's not necessarily stable.</strong> I can't promise there are no bugs, and
+            there's no support guarantee.</li>
+          <li><strong>There's no release schedule.</strong> Two features might land in one day, and
+            then nothing for a month.</li>
+          <li><strong>That said, I use it every day at work.</strong> It's my main editor, so bugs
+            that get in the way are found and fixed quickly. Frequent breakage isn't expected.</li>
+          <li><strong>Much of it is written with AI assistance.</strong> Since it's a personal build, I
+            use AI tools heavily to move faster on the fork's changes.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="features">
+    <div class="wrap">
+      <h2>What the fork adds</h2>
+      <p class="sub">
+        These features won't be accepted upstream, so they live here. Each one is documented in
+        detail, with its limitations, in
+        <a href="https://github.com/marcos-venicius/helix/blob/marcos/FORK.md">FORK.md</a>.
+      </p>
+      <div class="features">
+        <article class="feature">
+          <div class="text">
+            <h3>Claude Code popup</h3>
+            <p>Runs Claude Code in a terminal embedded in a popup, with the current file, line and
+              selection as context. Sessions keep running in the background when the popup is hidden.</p>
+          </div>
+          <div class="keys">
+            <div><span class="k"><kbd>space</kbd> <kbd>i</kbd></span><span class="d">toggle the popup</span></div>
+            <div><span class="k"><kbd>space</kbd> <kbd>I</kbd></span><span class="d">pick a session</span></div>
+            <div><span class="k"><code>:claude …</code></span><span class="d">new session with a prompt</span></div>
+          </div>
+          <a class="shot" href="screenshots/claude.webp"><img src="screenshots/claude.webp" width="1600" height="1013" loading="lazy" alt="Claude Code running in a popup over the editor, with a question typed in its prompt"></a>
+        </article>
+
+        <article class="feature">
+          <div class="text">
+            <h3>Side by side git diff</h3>
+            <p>A file's HEAD version next to its current contents, with syntax highlighting, aligned
+              changed lines and word level highlights. Unsaved buffer changes are included.</p>
+          </div>
+          <div class="keys">
+            <div><span class="k"><kbd>space</kbd> <kbd>=</kbd></span><span class="d">diff of the current file</span></div>
+            <div><span class="k"><kbd>C-g</kbd></span><span class="d">diff of the selected file in <kbd>space</kbd> <kbd>g</kbd></span></div>
+            <div><span class="k"><kbd>n</kbd> <kbd>N</kbd></span><span class="d">next / previous hunk</span></div>
+          </div>
+          <a class="shot" href="screenshots/commit-diff.webp"><img src="screenshots/commit-diff.webp" width="1600" height="1033" loading="lazy" alt="Side by side diff of a Rust file: removed lines on the left, added lines on the right, changed words highlighted"></a>
+        </article>
+
+        <article class="feature">
+          <div class="text">
+            <h3>Git commit log</h3>
+            <p>Browse the commits of HEAD, list the files a commit changed, and open the side by side
+              diff of any of them against the commit's parent.</p>
+          </div>
+          <div class="keys">
+            <div><span class="k"><kbd>space</kbd> <kbd>l</kbd></span><span class="d">commit picker</span></div>
+            <div><span class="k"><kbd>Enter</kbd></span><span class="d">files of the commit, then the diff</span></div>
+            <div><span class="k"><kbd>q</kbd> <kbd>Esc</kbd></span><span class="d">step back</span></div>
+          </div>
+          <a class="shot" href="screenshots/commit-log.webp"><img src="screenshots/commit-log.webp" width="1600" height="1006" loading="lazy" alt="Commit picker listing commits with their short id, date, author and summary"></a>
+        </article>
+
+        <article class="feature">
+          <div class="text">
+            <h3>File explorer side panel</h3>
+            <p>A file tree on the left of the editor, with icons, git ignored files dimmed, and the
+              current buffer revealed as you move around. Create, rename, move and delete from it.</p>
+          </div>
+          <div class="keys">
+            <div><span class="k"><kbd>space</kbd> <kbd>E</kbd></span><span class="d">open / focus / close</span></div>
+            <div><span class="k"><kbd>a</kbd> <kbd>r</kbd> <kbd>x</kbd> <kbd>d</kbd></span><span class="d">create, rename, move, delete</span></div>
+            <div><span class="k"><kbd>C-w</kbd> <kbd>h</kbd> <kbd>l</kbd></span><span class="d">move between panel and editor</span></div>
+          </div>
+          <a class="shot" href="screenshots/explorer.webp"><img src="screenshots/explorer.webp" width="1600" height="1006" loading="lazy" alt="File tree panel on the left of the editor, with folder and file icons and the current file selected"></a>
+        </article>
+
+        <article class="feature">
+          <div class="text">
+            <h3>Staged files in <kbd>space</kbd> <kbd>g</kbd></h3>
+            <p>Upstream's changed files picker only lists unstaged changes. Here it lists every change
+              compared to HEAD, like <code>git status</code>: staged, unstaged, added and renamed.</p>
+          </div>
+          <div class="keys">
+            <div><span class="k"><kbd>space</kbd> <kbd>g</kbd></span><span class="d">changed files picker</span></div>
+          </div>
+          <a class="shot" href="screenshots/changed-files.webp"><img src="screenshots/changed-files.webp" width="1600" height="1006" loading="lazy" alt="Changed files picker listing modified, untracked, renamed and added files, with a preview"></a>
+        </article>
+      </div>
+    </div>
+  </section>
+
+  <section id="install">
+    <div class="wrap steps">
+      <h2>Install</h2>
+      <p class="sub">
+        Built from source, the same way as upstream Helix. You need a Rust toolchain. The default
+        branch, <code>marcos</code>, is the fork's version.
+      </p>
+<pre><code>git clone https://github.com/marcos-venicius/helix
+cd helix
+cargo install --path helix-term --locked</code></pre>
+      <p>
+        This installs the <code>hx</code> binary, replacing an existing Helix install. Helix also
+        needs its runtime files (themes, grammars, queries): see
+        <a href="https://docs.helix-editor.com/building-from-source.html#configuring-helixs-runtime-files">configuring Helix's runtime files</a>.
+        The Claude Code popup needs the <code>claude</code> CLI in your <code>PATH</code>.
+      </p>
+      <p>
+        Found a bug in one of the fork's features? Please
+        <a href="https://github.com/marcos-venicius/helix/issues">open an issue on the fork</a>, not
+        upstream. Bugs in plain Helix belong
+        <a href="https://github.com/helix-editor/helix/issues">upstream</a>.
+      </p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>
+      This fork is not affiliated with or endorsed by the Helix project. Helix is developed by the
+      <a href="https://github.com/helix-editor/helix">Helix contributors</a>.
+    </p>
+    <p>
+      Like upstream, the code is licensed under the
+      <a href="https://github.com/marcos-venicius/helix/blob/marcos/LICENSE">Mozilla Public License 2.0</a>.
+    </p>
+  </div>
+</footer>
+
+</body>
+</html>

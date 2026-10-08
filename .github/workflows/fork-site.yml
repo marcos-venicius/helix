@@ -1,0 +1,38 @@
+# Publishes site/ (the fork's page) to GitHub Pages. Fork only: requires the repository's
+# Pages source to be set to "GitHub Actions". Upstream's gh-pages.yml (the Helix book) is
+# unrelated and its gh-pages branch is not what Pages serves.
+name: Fork site
+
+on:
+  push:
+    branches:
+      - marcos
+    paths:
+      - 'site/**'
+      - '.github/workflows/fork-site.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: fork-site
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.repository == 'marcos-venicius/helix'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4
