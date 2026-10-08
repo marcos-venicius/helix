@@ -41,7 +41,29 @@ Remotes:
 - Keep `marcos` in sync with upstream (below) before starting new features and whenever upstream has
   news.
 - Every PR that adds or changes a fork feature updates [FORK.md](FORK.md) (usage, limitations, ideas)
-  and the code table in [Fork features](#fork-features).
+  and the code table in [Fork features](#fork-features). A new feature, or a change to its main
+  keys, also updates its card in [site/index.html](site/index.html).
+
+## Site
+
+`site/index.html` is the fork's page, published to GitHub Pages
+(`https://marcos-venicius.github.io/helix/`) by `.github/workflows/fork-site.yml` on pushes to
+`marcos` that touch `site/`. The Pages source is "GitHub Actions": upstream's `gh-pages.yml` still
+pushes the Helix book to the `gh-pages` branch on `master`, but that branch isn't served. The page
+is a single HTML file with no build step, styled with the Catppuccin Mocha palette (the editor's
+`catppuccin_mocha` theme, which the screenshots use too) and JetBrains Mono from Google Fonts. It summarizes the features and links to
+FORK.md for the details, and its "Read this first" section says what the fork is (a personal build,
+no stability or release guarantees, AI-assisted). Each feature has a screenshot in `site/screenshots/`
+(WebP, 1600px wide): `hx` captured in a 130x34 tmux pane with the `catppuccin_mocha` theme, the
+pane's ANSI output turned into HTML and photographed with headless Chrome. When a feature's look
+changes, retake its screenshot the same way.
+
+Link previews and SEO live in the `<head>` of `site/index.html`: description, canonical URL, Open
+Graph and Twitter Card tags and JSON-LD. They use absolute URLs under
+`https://marcos-venicius.github.io/helix/`, so update them if the address changes. `site/og.jpg`
+(1200x630, under 300 KB so WhatsApp shows it) is the preview image: logo, title, tagline, the feature
+names and part of the commit diff screenshot, rendered from HTML with headless Chrome. When a
+feature is added or renamed, update the description in the tags and re-render the image.
 
 ## Syncing with upstream
 
