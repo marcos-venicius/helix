@@ -13,6 +13,7 @@ code lives:
 | --- | --- |
 | Claude Code popup | `helix-term/src/ui/claude.rs`, `helix-term/src/commands/claude.rs` |
 | Side by side git diff | `helix-term/src/ui/diff_view.rs`, `helix-term/src/commands/diff_view.rs` |
+| Git commit log | `helix-term/src/commands/git_log.rs`, `open_commit` in `helix-term/src/commands/diff_view.rs`, `for_each_commit` / `commit_changes` / `file_at_commit` in `helix-vcs/src/git.rs` and `helix-vcs/src/lib.rs`, `CommitInfo` in `helix-vcs/src/commit.rs` |
 | Staged files in the changed files picker | `status()` and its helpers in `helix-vcs/src/git.rs`, `FileChange::Added` in `helix-vcs/src/status.rs` |
 | File explorer side panel | `helix-term/src/ui/explorer.rs` and `helix-term/src/ui/explorer/` (icons, git ignore rules); hooks in `EditorView` (`helix-term/src/ui/editor.rs`), `ExplorerConfig` in `helix-view/src/editor.rs`; benchmarks in `helix-term/benches/explorer.rs` |
 
@@ -76,9 +77,14 @@ the same spots:
   focuses the explorer from the leftmost view. Keep upstream's version and re-add that check.
 - `helix-term/src/keymap/default.rs`, the `static_commands!` list in `helix-term/src/commands.rs`,
   `TYPABLE_COMMAND_LIST` in `helix-term/src/commands/typed.rs`: usually keep both sides.
-- `helix-term/src/ui/picker.rs`: we add a generic `with_key_handler` (a `key_handlers` field, its
-  builder and a check at the top of the key match in `handle_event`). Keep upstream's version and
-  re-add those pieces; `changed_file_picker` in `helix-term/src/commands.rs` uses it for `C-g`.
+- `helix-term/src/ui/picker.rs`: we add generic key handlers (a `key_handlers` field, the
+  `with_key_handler` and `with_stacked_key_handler` builders, and a check at the top of the key
+  match in `handle_event` that closes the picker or not). Keep upstream's version and re-add those
+  pieces; `changed_file_picker` in `helix-term/src/commands.rs` uses it for `C-g`, the commit
+  pickers in `commands/git_log.rs` for `Enter` and `C-g`.
+- `changed_file_picker` in `helix-term/src/commands.rs`: its columns and `FileChangeData` are moved
+  out into `file_change_columns`, shared with the commit files picker. If upstream changes the
+  columns, port the change into `file_change_columns`.
 - `helix-term/src/ui/editor.rs`: `EditorView` has an `explorer` field. `render` clips the
   explorer's width off the editor area before `cx.editor.resize`, calls `explorer.update` before
   drawing the views (unfocusing them while the explorer has the focus) and renders it after them.
@@ -89,7 +95,11 @@ the same spots:
 - `helix-vcs/src/git.rs`: `status()` is rewritten to also list staged changes (`into_iter` instead of
   `into_index_worktree_iter`, merging both kinds of change per file), and `FileChange` has an extra
   `Added` variant. If upstream changes `status()`, port their change onto our version and run
-  `cargo test -p helix-vcs --features git`, which covers the staged cases.
+  `cargo test -p helix-vcs --features git`, which covers the staged cases. `get_diff_base`'s
+  checkout filtering is factored into `to_worktree`, shared with `file_at_commit`.
+- `helix-vcs/src/lib.rs`, `helix-vcs/src/status.rs`: we add the commit log methods to
+  `DiffProviderRegistry` and `DiffProvider`, and `#[derive(Clone)]` to `FileChange`. Keep both
+  sides.
 - `helix-term/Cargo.toml`: we add a `bench` feature, `criterion` to the dev-dependencies and the
   `explorer` `[[bench]]`. Keep both sides.
 - `Cargo.lock`: take upstream's version, then run `cargo build` to add our dependencies back

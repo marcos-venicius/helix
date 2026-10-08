@@ -7,6 +7,7 @@ as in the [Helix documentation](https://docs.helix-editor.com/).
 
 - [Claude Code popup](#claude-code-popup)
 - [Side by side git diff](#side-by-side-git-diff)
+- [Git commit log](#git-commit-log)
 - [Staged files in the changed files picker](#staged-files-in-the-changed-files-picker)
 - [File explorer side panel](#file-explorer-side-panel)
 
@@ -110,6 +111,42 @@ are compared with their old path in HEAD.
 - Search inside the diff.
 - Fold long runs of unchanged lines.
 - Stage or revert a hunk from the diff.
+
+## Git commit log
+
+A picker of the commits reachable from HEAD, newest first, with their short id, date, author and
+summary. Choosing a commit lists the files it changed, and choosing a file opens the
+[side by side diff](#side-by-side-git-diff) of that file in the commit: its version in the
+commit's parent on the left, in the commit on the right.
+
+### Usage
+
+| Keys | Action |
+| --- | --- |
+| `space l`, `:git-log` | Open the commit picker. Typing filters by summary; `%commit`, `%author`, `%date` filter by the other columns. |
+| `Enter` in the commit picker | List the files changed by the commit, on top of the commit picker. The status line shows the commit. |
+| `Enter`, `C-g` in the files picker | Open the diff of the file, on top of the files picker. |
+| `C-s` / `C-v` in the files picker | Open the file as it is now in a split, closing both pickers. |
+| `q`, `Esc` in the diff | Back to the files picker. |
+| `Esc` in the files picker | Back to the commit picker. |
+| `Enter` in the diff | Open the file as it is now, at the current hunk, closing both pickers. |
+
+The diff keys are the same as in the [side by side diff](#side-by-side-git-diff). Renames are
+detected, so a renamed file is compared with its old path.
+
+### Limitations
+
+- Merge commits are compared with their first parent only.
+- `Enter` in the diff opens the file as it is now in the working tree, so the line it jumps to may
+  have moved since the commit. Files deleted since then can't be opened.
+- Only the history of HEAD is listed, sorted by commit time; there's no graph.
+- In a shallow clone, the oldest commit can't be shown: its parent isn't in the repository.
+
+### Ideas
+
+- List the commits that changed the current file.
+- Show the commit message and stats in a preview.
+- Pick another branch or a range.
 
 ## Staged files in the changed files picker
 
