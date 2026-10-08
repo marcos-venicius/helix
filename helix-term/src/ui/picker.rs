@@ -271,7 +271,8 @@ pub struct Picker<T: 'static + Send + Sync, D: 'static> {
     preview_highlight_handler: Sender<Arc<Path>>,
     dynamic_query_handler: Option<Sender<DynamicQueryChange>>,
     /// Extra keys that run a handler on the selected item and close the picker.
-    key_handlers: Vec<(KeyEvent, PickerKeyHandler<T>)>,
+    /// Extra keys, the handler to run on the selected item, and whether to close the picker.
+    key_handlers: Vec<(KeyEvent, PickerKeyHandler<T>, bool)>,
 }
 
 impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
@@ -465,7 +466,18 @@ impl<T: 'static + Send + Sync, D: 'static + Send + Sync> Picker<T, D> {
         key: KeyEvent,
         handler: impl Fn(&mut Context, &T) + 'static,
     ) -> Self {
-        self.key_handlers.push((key, Box::new(handler)));
+        self.key_handlers.push((key, Box::new(handler), true));
+        self
+    }
+
+    /// Pressing `key` runs `handler` on the selected item and keeps the picker open, so that
+    /// whatever `handler` pushes on top of it goes back to the picker when closed.
+    pub fn with_stacked_key_handler(
+        mut self,
+        key: KeyEvent,
+        handler: impl Fn(&mut Context, &T) + 'static,
+    ) -> Self {
+        self.key_handlers.push((key, Box::new(handler), false));
         self
     }
 
@@ -1100,9 +1112,14 @@ impl<I: 'static + Send + Sync, D: 'static + Send + Sync> Component for Picker<I,
             EventResult::Consumed(Some(callback))
         };
 
-        if let Some((_, handler)) = self.key_handlers.iter().find(|(key, _)| *key == key_event) {
+        if let Some((_, handler, close)) =
+            self.key_handlers.iter().find(|(key, ..)| *key == key_event)
+        {
             if let Some(option) = self.selection() {
                 handler(ctx, option);
+            }
+            if !close {
+                return EventResult::Consumed(None);
             }
             return close_fn(self);
         }

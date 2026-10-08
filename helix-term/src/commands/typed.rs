@@ -2672,6 +2672,21 @@ fn claude(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyho
     Ok(())
 }
 
+fn git_log(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+    cx.jobs.callback(async move {
+        let call = move |editor: &mut Editor, compositor: &mut Compositor| {
+            if let Some(picker) = super::git_log::commit_picker(editor) {
+                compositor.push(Box::new(overlaid(picker)));
+            }
+        };
+        Ok(Callback::EditorCompositor(Box::new(call)))
+    });
+    Ok(())
+}
+
 fn run_shell_command(
     cx: &mut compositor::Context,
     args: Args,
@@ -4005,6 +4020,17 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         completer: CommandCompleter::none(),
         signature: Signature {
             positionals: (0, None),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "git-log",
+        aliases: &[],
+        doc: "Open the git commit log picker. Enter lists the files changed by a commit, Enter on a file shows its diff.",
+        fun: git_log,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
             ..Signature::DEFAULT
         },
     },

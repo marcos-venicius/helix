@@ -1,10 +1,11 @@
 use std::path::{Path, PathBuf};
 
-use helix_vcs::FileChange;
+use helix_vcs::{CommitInfo, FileChange};
 use helix_view::Editor;
 
 use crate::compositor::Compositor;
 use crate::ui::diff_view::{DiffView, Side};
+use crate::ui::picker;
 
 /// Opens a side by side diff between the HEAD version of `base_path` and the current contents
 /// of `path` (they only differ for renamed files).
@@ -103,4 +104,74 @@ pub(crate) fn open_current(editor: &mut Editor, compositor: &mut Compositor) {
     if let Err(err) = open(editor, compositor, &path, &path) {
         editor.set_error(err.to_string());
     }
+}
+
+/// Opens the diff of `change` in `commit` against the commit's first parent, on top of the
+/// commit pickers. Opening the file from the diff closes those pickers too.
+pub(crate) fn open_commit(
+    editor: &mut Editor,
+    compositor: &mut Compositor,
+    cwd: &Path,
+    commit: &CommitInfo,
+    change: &FileChange,
+) -> anyhow::Result<()> {
+    let relative = |path: &Path| {
+        helix_stdx::path::get_relative_path(path)
+            .display()
+            .to_string()
+    };
+    let trust_full = editor
+        .workspace_trust
+        .query(
+            &helix_loader::find_workspace_in(cwd).0,
+            helix_loader::workspace_trust::TrustQuery::Git,
+        )
+        .is_trusted();
+    let read = |id: &str, path: &Path| -> anyhow::Result<Option<String>> {
+        editor
+            .diff_providers
+            .file_at_commit(cwd, trust_full, id, path)?
+            .map(|bytes| {
+                String::from_utf8(bytes)
+                    .map_err(|_| anyhow::anyhow!("{} is a binary file", relative(path)))
+            })
+            .transpose()
+    };
+
+    let (base_path, path) = paths_of(change);
+    let short = &commit.short_id;
+    let (base, left_title) = match read(&format!("{}^", commit.id), &base_path)? {
+        Some(text) => (text, format!("{short}^: {}", relative(&base_path))),
+        None => (String::new(), format!("{short}^: (new file)")),
+    };
+    let (current, right_title) = match read(&commit.id, &path)? {
+        Some(text) => (text, format!("{short}: {}", relative(&path))),
+        None => (
+            String::new(),
+            format!("{short}: {} (deleted)", relative(&path)),
+        ),
+    };
+    let tab_width = editor
+        .document_by_path(&path)
+        .map_or(4, |doc| doc.tab_width());
+
+    let left = Side::new(left_title, base, &base_path, editor);
+    let right = Side::new(right_title, current, &path, editor);
+    let view = DiffView::new(
+        left,
+        right,
+        path.exists().then_some(path.clone()),
+        tab_width,
+    )
+    // the commit's files picker and the commit picker below it
+    .with_on_open(|compositor| {
+        compositor.remove(picker::ID);
+        compositor.remove(picker::ID);
+    });
+    if !view.has_changes() {
+        editor.set_status(format!("No changes in {}", relative(&path)));
+        return Ok(());
+    }
+    compositor.push(Box::new(view));
+    Ok(())
 }

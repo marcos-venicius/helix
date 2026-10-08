@@ -10,16 +10,19 @@ use gix::bstr::ByteSlice;
 use gix::diff::index::Change as TreeIndexChange;
 use gix::diff::Rewrites;
 use gix::dir::entry::Status;
+use gix::object::tree::diff::ChangeDetached as TreeChange;
 use gix::objs::tree::EntryKind;
+use gix::revision::walk::Sorting;
 use gix::sec::trust::DefaultForLevel;
 use gix::status::{
     index_worktree::Item,
     plumbing::index_as_worktree::{Change, EntryStatus},
     Item as StatusItem, UntrackedFiles,
 };
+use gix::traverse::commit::simple::CommitTimeOrder;
 use gix::{Commit, ObjectId, Repository, ThreadSafeRepository};
 
-use crate::FileChange;
+use crate::{CommitInfo, FileChange};
 
 #[cfg(test)]
 mod test;
@@ -43,7 +46,12 @@ pub fn get_diff_base(file: &Path, trust_full: bool) -> Result<Vec<u8>> {
     let head = repo.head_commit()?;
     let file_oid = find_file_in_commit(&repo, &head, &file)?;
 
-    let file_object = repo.find_object(file_oid)?;
+    to_worktree(&repo, &file, file_oid)
+}
+
+/// The contents of the blob `oid` as they would be checked out at `file`.
+fn to_worktree(repo: &Repository, file: &Path, oid: ObjectId) -> Result<Vec<u8>> {
+    let file_object = repo.find_object(oid)?;
     let data = file_object.detach().data;
     // Get the actual data that git would make out of the git object.
     // This will apply the user's git config or attributes like crlf conversions.
@@ -85,6 +93,134 @@ pub fn get_current_head_name(file: &Path, trust_full: bool) -> Result<Arc<ArcSwa
     };
 
     Ok(Arc::new(ArcSwap::from_pointee(name.into_boxed_str())))
+}
+
+pub fn for_each_commit(
+    cwd: &Path,
+    trust_full: bool,
+    f: impl Fn(Result<CommitInfo>) -> bool,
+) -> Result<()> {
+    let repo = open_repo(cwd, trust_full)?.to_thread_local();
+    let walk = repo
+        .head_id()?
+        .ancestors()
+        .sorting(Sorting::ByCommitTime(CommitTimeOrder::NewestFirst))
+        .all()?;
+    for info in walk {
+        let commit = info
+            .map_err(anyhow::Error::from)
+            .and_then(|info| commit_info(&info.object()?));
+        if !f(commit) {
+            break;
+        }
+    }
+    Ok(())
+}
+
+fn commit_info(commit: &Commit) -> Result<CommitInfo> {
+    let author = commit.author()?;
+    Ok(CommitInfo {
+        id: commit.id.to_string(),
+        short_id: commit.id.to_hex_with_len(9).to_string(),
+        summary: commit.message()?.summary().to_string(),
+        author: author.name.to_string(),
+        date: author
+            .time()?
+            .format_or_unix(gix::date::time::format::SHORT),
+    })
+}
+
+/// The files changed by commit `id`, compared to its first parent.
+pub fn commit_changes(cwd: &Path, trust_full: bool, id: &str) -> Result<Vec<FileChange>> {
+    let repo = open_repo(cwd, trust_full)?.to_thread_local();
+    let work_dir = repo.workdir().context("repo has no worktree")?;
+    let commit = repo.find_commit(ObjectId::from_hex(id.as_bytes())?)?;
+    let tree = commit.tree()?;
+    let parent_tree = match commit.parent_ids().next() {
+        Some(parent) => Some(
+            parent
+                .object()
+                .with_context(|| missing_parent(&commit))?
+                .into_commit()
+                .tree()?,
+        ),
+        None => None,
+    };
+    let options = gix::diff::Options::default().with_rewrites(Some(Rewrites {
+        copies: None,
+        percentage: Some(0.5),
+        limit: 1000,
+        ..Default::default()
+    }));
+    let path = |location: &[u8]| -> Result<PathBuf> { Ok(work_dir.join(location.to_path()?)) };
+    let mut changes = Vec::new();
+    for change in repo.diff_tree_to_tree(parent_tree.as_ref(), &tree, options)? {
+        if !change.entry_mode().is_blob_or_symlink() {
+            continue;
+        }
+        changes.push(match change {
+            TreeChange::Addition { location, .. } => FileChange::Added {
+                path: path(&location)?,
+            },
+            TreeChange::Deletion { location, .. } => FileChange::Deleted {
+                path: path(&location)?,
+            },
+            TreeChange::Modification { location, .. } => FileChange::Modified {
+                path: path(&location)?,
+            },
+            TreeChange::Rewrite { location, copy, .. } if copy => FileChange::Added {
+                path: path(&location)?,
+            },
+            TreeChange::Rewrite {
+                source_location,
+                location,
+                ..
+            } => FileChange::Renamed {
+                from_path: path(&source_location)?,
+                to_path: path(&location)?,
+            },
+        });
+    }
+    changes.sort_by(|a, b| a.path().cmp(b.path()));
+    Ok(changes)
+}
+
+/// The contents of `file` in commit `id` (`id^` for its first parent), or `None` if it isn't
+/// in that commit.
+pub fn file_at_commit(
+    cwd: &Path,
+    trust_full: bool,
+    id: &str,
+    file: &Path,
+) -> Result<Option<Vec<u8>>> {
+    let repo = open_repo(cwd, trust_full)?.to_thread_local();
+    let (id, parent) = match id.strip_suffix('^') {
+        Some(id) => (id, true),
+        None => (id, false),
+    };
+    let mut commit = repo.find_commit(ObjectId::from_hex(id.as_bytes())?)?;
+    if parent {
+        let parent_id = commit.parent_ids().next().map(|id| id.detach());
+        match parent_id {
+            Some(parent_id) => {
+                commit = repo
+                    .find_commit(parent_id)
+                    .with_context(|| missing_parent(&commit))?
+            }
+            None => return Ok(None),
+        }
+    }
+    let Ok(oid) = find_file_in_commit(&repo, &commit, file) else {
+        return Ok(None);
+    };
+    to_worktree(&repo, file, oid).map(Some)
+}
+
+fn missing_parent(commit: &Commit) -> String {
+    format!(
+        "the parent of {} is not in the repository (shallow clone?)",
+        commit.id.to_hex_with_len(9)
+    )
 }
 
 pub fn for_each_changed_file(
