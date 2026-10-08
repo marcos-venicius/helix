@@ -7,14 +7,13 @@ use crate::compositor::Compositor;
 use crate::ui::diff_view::{DiffView, Side};
 use crate::ui::picker;
 
-/// Opens a side by side diff between the HEAD version of `base_path` and the current contents
-/// of `path` (they only differ for renamed files).
-pub(crate) fn open(
+/// A side by side diff between the HEAD version of `base_path` and the current contents of
+/// `path` (they only differ for renamed files), or `None` if they are the same.
+fn head_diff(
     editor: &mut Editor,
-    compositor: &mut Compositor,
     base_path: &Path,
     path: &Path,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<DiffView>> {
     let relative = |path: &Path| {
         helix_stdx::path::get_relative_path(path)
             .display()
@@ -68,10 +67,9 @@ pub(crate) fn open(
     let view = DiffView::new(left, right, exists.then(|| path.to_path_buf()), tab_width);
     if !view.has_changes() {
         editor.set_status(format!("No changes in {}", relative(path)));
-        return Ok(());
+        return Ok(None);
     }
-    compositor.push(Box::new(view));
-    Ok(())
+    Ok(Some(view))
 }
 
 /// The HEAD path and the current path to diff for an entry of the changed files picker.
@@ -82,14 +80,19 @@ pub(crate) fn paths_of(change: &FileChange) -> (PathBuf, PathBuf) {
     }
 }
 
-/// Opens the diff for an entry of the changed files picker, once the picker has closed.
+/// Opens the diff for an entry of the changed files picker, on top of the picker. Opening the
+/// file from the diff closes the picker too.
 pub(crate) fn open_from_picker(cx: &mut crate::compositor::Context, change: &FileChange) {
     let (base_path, path) = paths_of(change);
     cx.jobs.callback(async move {
-        let call = move |editor: &mut Editor, compositor: &mut Compositor| {
-            if let Err(err) = open(editor, compositor, &base_path, &path) {
-                editor.set_error(err.to_string());
-            }
+        let call = move |editor: &mut Editor, compositor: &mut Compositor| match head_diff(
+            editor, &base_path, &path,
+        ) {
+            Ok(Some(view)) => compositor.push(Box::new(view.with_on_open(|compositor| {
+                compositor.remove(picker::ID);
+            }))),
+            Ok(None) => {}
+            Err(err) => editor.set_error(err.to_string()),
         };
         Ok(crate::job::Callback::EditorCompositor(Box::new(call)))
     });
@@ -101,8 +104,10 @@ pub(crate) fn open_current(editor: &mut Editor, compositor: &mut Compositor) {
         editor.set_error("The current buffer has no file");
         return;
     };
-    if let Err(err) = open(editor, compositor, &path, &path) {
-        editor.set_error(err.to_string());
+    match head_diff(editor, &path, &path) {
+        Ok(Some(view)) => compositor.push(Box::new(view)),
+        Ok(None) => {}
+        Err(err) => editor.set_error(err.to_string()),
     }
 }
 

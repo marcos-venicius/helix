@@ -82,7 +82,7 @@ unsaved changes, the right side shows the buffer and its title says `[modified]`
 | Keys | Action |
 | --- | --- |
 | `space =` | Open the diff of the current file. |
-| `C-g` in the changed files picker (`space g`) | Open the diff of the selected file. `Enter` still opens the file. |
+| `C-g` in the changed files picker (`space g`) | Open the diff of the selected file on top of the picker: closing the diff goes back to the picker. `Enter` still opens the file. |
 
 Inside the diff:
 
@@ -92,7 +92,7 @@ Inside the diff:
 | `j` / `k`, `C-d` / `C-u`, `C-f` / `C-b`, `PageDown` / `PageUp`, mouse wheel | Scroll |
 | `g` / `G` | Top / bottom |
 | `h` / `l`, `0` | Scroll horizontally, back to the start of the line |
-| `Enter` | Close the diff and open the file at the current hunk |
+| `Enter` | Close the diff (and the picker it was opened from) and open the file at the current hunk |
 | `q`, `Esc` | Close |
 
 The footer shows the current hunk (e.g. `hunk 2/5`), and its line numbers are bold. New files

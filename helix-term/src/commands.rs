@@ -3574,7 +3574,7 @@ fn changed_file_picker(cx: &mut Context) {
         },
     )
     .with_preview(|_editor, meta| Some((meta.path().into(), None)))
-    .with_key_handler(crate::ctrl!('g'), diff_view::open_from_picker);
+    .with_stacked_key_handler(crate::ctrl!('g'), diff_view::open_from_picker);
     let injector = picker.injector();
 
     let trust_full = cx

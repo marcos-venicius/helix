@@ -80,8 +80,8 @@ the same spots:
 - `helix-term/src/ui/picker.rs`: we add generic key handlers (a `key_handlers` field, the
   `with_key_handler` and `with_stacked_key_handler` builders, and a check at the top of the key
   match in `handle_event` that closes the picker or not). Keep upstream's version and re-add those
-  pieces; `changed_file_picker` in `helix-term/src/commands.rs` uses it for `C-g`, the commit
-  pickers in `commands/git_log.rs` for `Enter` and `C-g`.
+  pieces; `changed_file_picker` in `helix-term/src/commands.rs` uses the stacked one for `C-g`,
+  the commit pickers in `commands/git_log.rs` for `Enter` and `C-g`.
 - `changed_file_picker` in `helix-term/src/commands.rs`: its columns and `FileChangeData` are moved
   out into `file_change_columns`, shared with the commit files picker. If upstream changes the
   columns, port the change into `file_change_columns`.
