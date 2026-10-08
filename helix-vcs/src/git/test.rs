@@ -278,3 +278,90 @@ fn status_lists_staged_renames() {
     exec_git_cmd("mv b.txt c.txt", repo);
     assert_eq!(changed_files(repo), [("renamed", "b.txt -> c.txt".into())]);
 }
+
+fn head_id(repo: &Path) -> String {
+    let out = Command::new("git")
+        .arg("-C")
+        .arg(repo)
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .unwrap();
+    String::from_utf8(out.stdout).unwrap().trim().to_string()
+}
+
+fn commit_changes(repo: &Path, id: &str) -> Vec<(&'static str, String)> {
+    use crate::FileChange;
+
+    let name = |path: &Path| path.file_name().unwrap().to_string_lossy().to_string();
+    git::commit_changes(repo, true, id)
+        .unwrap()
+        .into_iter()
+        .map(|change| match change {
+            FileChange::Added { path } => ("added", name(&path)),
+            FileChange::Modified { path } => ("modified", name(&path)),
+            FileChange::Deleted { path } => ("deleted", name(&path)),
+            FileChange::Renamed { from_path, to_path } => (
+                "renamed",
+                format!("{} -> {}", name(&from_path), name(&to_path)),
+            ),
+            _ => unreachable!(),
+        })
+        .collect()
+}
+
+#[test]
+fn commit_log_lists_changes_and_contents() {
+    let temp_git = committed_repo();
+    let repo = temp_git.path();
+    // Contents are read as they'd be checked out: keep LF line endings even where git's
+    // config says otherwise (core.autocrlf is true on Windows CI runners).
+    exec_git_cmd("config core.autocrlf false", repo);
+    let root = head_id(repo);
+
+    write(repo, "a.txt", "changed\n");
+    exec_git_cmd("mv b.txt c.txt", repo);
+    write(repo, "new.txt", "new\n");
+    exec_git_cmd("add -A", repo);
+    exec_git_cmd("commit -m second", repo);
+    let second = head_id(repo);
+
+    exec_git_cmd("rm -q new.txt", repo);
+    exec_git_cmd("commit -m third", repo);
+    let third = head_id(repo);
+
+    assert_eq!(
+        commit_changes(repo, &root),
+        [("added", "a.txt".into()), ("added", "b.txt".into())]
+    );
+    assert_eq!(
+        commit_changes(repo, &second),
+        [
+            ("modified", "a.txt".into()),
+            ("renamed", "b.txt -> c.txt".into()),
+            ("added", "new.txt".into()),
+        ]
+    );
+    assert_eq!(
+        commit_changes(repo, &third),
+        [("deleted", "new.txt".into())]
+    );
+
+    let a = repo.join("a.txt");
+    let at = |id: &str, file: &Path| git::file_at_commit(repo, true, id, file).unwrap();
+    assert_eq!(at(&second, &a), Some(b"changed\n".to_vec()));
+    assert_eq!(at(&format!("{second}^"), &a), Some(b"a\n".to_vec()));
+    assert_eq!(at(&format!("{root}^"), &a), None);
+    assert_eq!(at(&third, &repo.join("new.txt")), None);
+
+    let summaries = std::sync::Mutex::new(Vec::new());
+    git::for_each_commit(repo, true, |commit| {
+        let commit = commit.unwrap();
+        assert_eq!(commit.date, "2000-01-01");
+        summaries.lock().unwrap().push(commit.summary);
+        true
+    })
+    .unwrap();
+    let mut summaries = summaries.into_inner().unwrap();
+    summaries.sort();
+    assert_eq!(summaries, ["message", "second", "third"]);
+}

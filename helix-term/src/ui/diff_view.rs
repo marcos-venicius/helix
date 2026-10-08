@@ -368,6 +368,8 @@ impl Palette {
     }
 }
 
+type OnOpen = Box<dyn FnOnce(&mut Compositor)>;
+
 pub struct DiffView {
     left: Side,
     right: Side,
@@ -375,6 +377,8 @@ pub struct DiffView {
     hunks: Vec<usize>,
     /// File to open with Enter, if it still exists.
     path: Option<PathBuf>,
+    /// Run when Enter opens the file, to close what the view was opened from.
+    on_open: Option<OnOpen>,
     tab_width: usize,
     scroll: usize,
     hscroll: usize,
@@ -399,6 +403,7 @@ impl DiffView {
             rows,
             hunks,
             path,
+            on_open: None,
             tab_width: tab_width.max(1),
             scroll,
             hscroll: 0,
@@ -406,6 +411,12 @@ impl DiffView {
             pending: None,
             current: 0,
         }
+    }
+
+    /// Runs `on_open` on the compositor when Enter opens the file.
+    pub fn with_on_open(mut self, on_open: impl FnOnce(&mut Compositor) + 'static) -> DiffView {
+        self.on_open = Some(Box::new(on_open));
+        self
     }
 
     /// Whether the two sides differ at all.
@@ -477,13 +488,17 @@ impl DiffView {
     }
 
     /// Closes the view and opens the file at the line shown at the top.
-    fn open_file(&self) -> EventResult {
+    fn open_file(&mut self) -> EventResult {
         let Some(path) = self.path.clone() else {
             return Self::close();
         };
         let line = self.current_right_line().unwrap_or(0);
+        let on_open = self.on_open.take();
         EventResult::Consumed(Some(Box::new(move |compositor: &mut Compositor, cx| {
             compositor.remove(ID);
+            if let Some(on_open) = on_open {
+                on_open(compositor);
+            }
             if let Err(err) = cx.editor.open(&path, Action::Replace) {
                 cx.editor.set_error(format!("{err}"));
                 return;
