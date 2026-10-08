@@ -138,6 +138,9 @@ impl Session {
                 ("TERM".to_string(), "xterm-256color".to_string()),
                 ("COLORTERM".to_string(), "truecolor".to_string()),
             ]),
+            // the arguments can hold a prompt with spaces and quotes
+            #[cfg(target_os = "windows")]
+            escape_args: true,
         };
         let pty = tty::new(&options, window_size(cols, rows), id as u64)
             .map_err(|err| anyhow::anyhow!("Failed to start claude: {err}"))?;

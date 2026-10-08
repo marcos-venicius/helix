@@ -313,6 +313,9 @@ fn commit_changes(repo: &Path, id: &str) -> Vec<(&'static str, String)> {
 fn commit_log_lists_changes_and_contents() {
     let temp_git = committed_repo();
     let repo = temp_git.path();
+    // Contents are read as they'd be checked out: keep LF line endings even where git's
+    // config says otherwise (core.autocrlf is true on Windows CI runners).
+    exec_git_cmd("config core.autocrlf false", repo);
     let root = head_id(repo);
 
     write(repo, "a.txt", "changed\n");
