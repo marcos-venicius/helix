@@ -14,10 +14,22 @@ use helix_term::ui::explorer::bench;
 /// one made within 2 seconds of a change.
 fn backdate(dir: &Path) {
     let an_hour_ago = SystemTime::now() - Duration::from_secs(3600);
-    fs::File::open(dir)
-        .unwrap()
-        .set_modified(an_hour_ago)
-        .unwrap();
+    open_dir(dir).set_modified(an_hour_ago).unwrap();
+}
+
+/// Opens `dir` so that its modification time can be changed. Windows only opens a directory
+/// with `FILE_FLAG_BACKUP_SEMANTICS`, and needs write access to change its times.
+fn open_dir(dir: &Path) -> std::fs::File {
+    let mut options = std::fs::OpenOptions::new();
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+        options.write(true).custom_flags(FILE_FLAG_BACKUP_SEMANTICS);
+    }
+    #[cfg(not(windows))]
+    options.read(true);
+    options.open(dir).unwrap()
 }
 
 /// A git repository, with a `.gitignore` at the root.

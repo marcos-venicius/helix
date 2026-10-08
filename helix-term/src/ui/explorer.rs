@@ -1421,9 +1421,15 @@ mod tests {
         std::fs::write(&old, "").unwrap();
         // What a case-insensitive filesystem finds at `new` is `old` itself.
         assert!(same_entry(&old, &new));
-        // Here `new` really is another file.
         std::fs::write(&new, "").unwrap();
-        assert!(!same_entry(&old, &new));
+        let case_sensitive = std::fs::read_dir(dir.path()).unwrap().count() == 2;
+        if case_sensitive {
+            // Here `new` really is another file.
+            assert!(!same_entry(&old, &new));
+        } else {
+            // Writing `new` wrote `old` (macOS, Windows): still a case-only rename.
+            assert!(same_entry(&old, &new));
+        }
         assert!(!same_entry(&old, &dir.path().join("other.md")));
     }
 
@@ -1499,15 +1505,27 @@ mod tests {
         assert!(tree.contains(&("  main.rs".into(), true)));
     }
 
+    /// Opens `dir` so that its modification time can be changed. Windows only opens a directory
+    /// with `FILE_FLAG_BACKUP_SEMANTICS`, and needs write access to change its times.
+    fn open_dir(dir: &Path) -> std::fs::File {
+        let mut options = std::fs::OpenOptions::new();
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x0200_0000;
+            options.write(true).custom_flags(FILE_FLAG_BACKUP_SEMANTICS);
+        }
+        #[cfg(not(windows))]
+        options.read(true);
+        options.open(dir).unwrap()
+    }
+
     #[test]
     fn listing_is_current_until_the_directory_changes() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let an_hour_ago = SystemTime::now() - Duration::from_secs(3600);
-        std::fs::File::open(root)
-            .unwrap()
-            .set_modified(an_hour_ago)
-            .unwrap();
+        open_dir(root).set_modified(an_hour_ago).unwrap();
         let mut listings = HashMap::new();
         build_tree(root, &HashSet::new(), false, &mut listings);
         assert!(listings[root].is_current(root));
