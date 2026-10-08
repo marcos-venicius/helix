@@ -1421,9 +1421,15 @@ mod tests {
         std::fs::write(&old, "").unwrap();
         // What a case-insensitive filesystem finds at `new` is `old` itself.
         assert!(same_entry(&old, &new));
-        // Here `new` really is another file.
         std::fs::write(&new, "").unwrap();
-        assert!(!same_entry(&old, &new));
+        let case_sensitive = std::fs::read_dir(dir.path()).unwrap().count() == 2;
+        if case_sensitive {
+            // Here `new` really is another file.
+            assert!(!same_entry(&old, &new));
+        } else {
+            // Writing `new` wrote `old` (macOS, Windows): still a case-only rename.
+            assert!(same_entry(&old, &new));
+        }
         assert!(!same_entry(&old, &dir.path().join("other.md")));
     }
 
