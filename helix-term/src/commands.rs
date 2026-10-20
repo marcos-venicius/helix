@@ -3,6 +3,7 @@ pub(crate) mod dap;
 pub(crate) mod diff_view;
 pub(crate) mod git_log;
 pub(crate) mod lsp;
+pub(crate) mod markdown_table;
 pub(crate) mod syntax;
 pub(crate) mod typed;
 
@@ -612,6 +613,7 @@ impl MappableCommand {
         git_diff_view, "Open a side by side git diff of the current file",
         commit_picker, "Open the git commit log picker",
         toggle_explorer, "Toggle the file explorer side panel",
+        format_table, "Format the Markdown tables in the selections",
         rename_symbol, "Rename symbol",
         increment, "Increment item under cursor",
         decrement, "Decrement item under cursor",
@@ -6805,6 +6807,10 @@ fn toggle_explorer(cx: &mut Context) {
             ui::explorer::toggle(editor_view, cx.editor)
         }
     }));
+}
+
+fn format_table(cx: &mut Context) {
+    markdown_table::format(cx.editor);
 }
 
 fn claude_session_picker(cx: &mut Context) {

@@ -2672,6 +2672,19 @@ fn claude(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyho
     Ok(())
 }
 
+fn format_table(
+    cx: &mut compositor::Context,
+    _args: Args,
+    event: PromptEvent,
+) -> anyhow::Result<()> {
+    if event != PromptEvent::Validate {
+        return Ok(());
+    }
+
+    super::markdown_table::format(cx.editor);
+    Ok(())
+}
+
 fn git_log(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyhow::Result<()> {
     if event != PromptEvent::Validate {
         return Ok(());
@@ -4028,6 +4041,17 @@ pub const TYPABLE_COMMAND_LIST: &[TypableCommand] = &[
         aliases: &[],
         doc: "Open the git commit log picker. Enter lists the files changed by a commit, Enter on a file shows its diff.",
         fun: git_log,
+        completer: CommandCompleter::none(),
+        signature: Signature {
+            positionals: (0, Some(0)),
+            ..Signature::DEFAULT
+        },
+    },
+    TypableCommand {
+        name: "format-table",
+        aliases: &[],
+        doc: "Format the Markdown tables in the selections: pad the cells so the columns line up. A cursor inside a table formats the whole table.",
+        fun: format_table,
         completer: CommandCompleter::none(),
         signature: Signature {
             positionals: (0, Some(0)),

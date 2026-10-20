@@ -240,6 +240,7 @@ pub fn default() -> HashMap<Mode, KeyTrie> {
             "I" => claude_session_picker,
             "=" => git_diff_view,
             "E" => toggle_explorer,
+            "t" => format_table,
             "'" => last_picker,
             "G" => { "Debug (experimental)" sticky=true
                 "l" => dap_launch,
