@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>marcos/helix — a personal fork of the Helix editor</title>
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23cba6f7'/%3E%3Cg fill='none' stroke='%231e1e2e' stroke-width='2.4' stroke-linecap='round'%3E%3Ccircle cx='10' cy='8' r='2.6'/%3E%3Ccircle cx='22' cy='8' r='2.6'/%3E%3Ccircle cx='16' cy='24.5' r='2.6'/%3E%3Cpath d='M10 10.6v2.4a4 4 0 0 0 4 4h4a4 4 0 0 0 4-4v-2.4M16 17v4.9'/%3E%3C/g%3E%3C/svg%3E">
-<meta name="description" content="A personal fork of the Helix editor: upstream Helix plus a Claude Code popup, side by side git diffs, a git commit log and a file explorer panel. Not a new editor.">
+<meta name="description" content="A personal fork of the Helix editor: upstream Helix plus a Claude Code popup, side by side git diffs, a git commit log, a file explorer panel and a Markdown table formatter. Not a new editor.">
 <meta name="author" content="Marcos Sousa">
 <meta name="theme-color" content="#1e1e2e">
 <link rel="canonical" href="https://marcos-venicius.github.io/helix/">
@@ -15,7 +15,7 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="marcos/helix">
 <meta property="og:title" content="marcos/helix — a personal fork of the Helix editor">
-<meta property="og:description" content="A personal fork of the Helix editor: upstream Helix plus a Claude Code popup, side by side git diffs, a git commit log and a file explorer panel. Not a new editor.">
+<meta property="og:description" content="A personal fork of the Helix editor: upstream Helix plus a Claude Code popup, side by side git diffs, a git commit log, a file explorer panel and a Markdown table formatter. Not a new editor.">
 <meta property="og:url" content="https://marcos-venicius.github.io/helix/">
 <meta property="og:image" content="https://marcos-venicius.github.io/helix/og.jpg">
 <meta property="og:image:type" content="image/jpeg">
@@ -25,7 +25,7 @@
 <meta property="og:locale" content="en_US">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="marcos/helix — a personal fork of the Helix editor">
-<meta name="twitter:description" content="A personal fork of the Helix editor: upstream Helix plus a Claude Code popup, side by side git diffs, a git commit log and a file explorer panel. Not a new editor.">
+<meta name="twitter:description" content="A personal fork of the Helix editor: upstream Helix plus a Claude Code popup, side by side git diffs, a git commit log, a file explorer panel and a Markdown table formatter. Not a new editor.">
 <meta name="twitter:image" content="https://marcos-venicius.github.io/helix/og.jpg">
 <meta name="twitter:image:alt" content="marcos/helix logo and title, with a side by side git diff from the editor">
 
@@ -34,7 +34,7 @@
   "@context": "https://schema.org",
   "@type": "SoftwareSourceCode",
   "name": "marcos/helix",
-  "description": "A personal fork of the Helix editor: upstream Helix plus a Claude Code popup, side by side git diffs, a git commit log and a file explorer panel. Not a new editor.",
+  "description": "A personal fork of the Helix editor: upstream Helix plus a Claude Code popup, side by side git diffs, a git commit log, a file explorer panel and a Markdown table formatter. Not a new editor.",
   "url": "https://marcos-venicius.github.io/helix/",
   "codeRepository": "https://github.com/marcos-venicius/helix",
   "programmingLanguage": "Rust",
@@ -349,6 +349,20 @@
             <div><span class="k"><kbd>C-w</kbd> <kbd>h</kbd> <kbd>l</kbd></span><span class="d">move between panel and editor</span></div>
           </div>
           <a class="shot" href="screenshots/explorer.webp"><img src="screenshots/explorer.webp" width="1600" height="1006" loading="lazy" alt="File tree panel on the left of the editor, with folder and file icons and the current file selected"></a>
+        </article>
+
+        <article class="feature">
+          <div class="text">
+            <h3>Markdown table formatting</h3>
+            <p>Pads the cells of a Markdown table so the columns line up, and rewrites the delimiter
+              row to match, keeping each column's alignment. A missing delimiter row is added.</p>
+          </div>
+          <div class="keys">
+            <div><span class="k"><kbd>space</kbd> <kbd>t</kbd></span><span class="d">format the table under the cursor</span></div>
+            <div><span class="k"><kbd>%</kbd> <kbd>space</kbd> <kbd>t</kbd></span><span class="d">format every table in the file</span></div>
+            <div><span class="k"><code>:format-table</code></span><span class="d">same, as a command</span></div>
+          </div>
+          <a class="shot" href="screenshots/table.webp"><img src="screenshots/table.webp" width="1600" height="994" loading="lazy" alt="Two Markdown tables before formatting on the left, and aligned with padded cells after space t on the right"></a>
         </article>
 
         <article class="feature">

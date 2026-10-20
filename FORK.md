@@ -10,6 +10,7 @@ as in the [Helix documentation](https://docs.helix-editor.com/).
 - [Git commit log](#git-commit-log)
 - [Staged files in the changed files picker](#staged-files-in-the-changed-files-picker)
 - [File explorer side panel](#file-explorer-side-panel)
+- [Markdown table formatting](#markdown-table-formatting)
 
 To build and install the fork, from the `marcos` branch:
 
@@ -249,3 +250,51 @@ focused) and `ui.window` (separator).
 
 - Copy and paste (`c`/`p`), and a multi-selection for batch moves and deletions.
 - Git status markers (modified, added, untracked) next to the entries.
+
+## Markdown table formatting
+
+Formats Markdown tables: pads the cells so the columns line up and rewrites the delimiter row to
+match, keeping each column's alignment (`:--`, `:-:`, `--:`). It works in any buffer, not only
+Markdown files.
+
+```text
+| Step | Owner | Due |            | Step           | Owner  | Due |
+|-|:-:|-:|                        | -------------- | :----: | --: |
+| Sync upstream | marcos | Mon | → | Sync upstream  | marcos | Mon |
+| Build and test | CI |           | Build and test |   CI   |     |
+```
+
+### Usage
+
+| Keys / command | Action |
+| --- | --- |
+| `space t`, `:format-table` | Format the tables touched by the selections. |
+
+A table is always formatted as a whole, so a cursor anywhere inside it is enough. To format every
+table in a file, select it all first (`%`, then `space t`). Each selection can touch several tables:
+text between them is left as is. The cursors stay on their lines.
+
+What is formatted:
+
+- A table is a block of consecutive lines containing a `|`. Its second line must be a delimiter row
+  (`---`, with optional colons). Without one, if every line starts with `|`, a delimiter row is
+  inserted after the first line, so a table can be written without it.
+- Outer pipes are optional in the input and always added in the output. `\|` doesn't split cells.
+- Rows with fewer cells than the widest row are padded with empty cells. Columns are at least three
+  characters wide, the minimum for a delimiter.
+- Wide characters (CJK, emoji) are measured by their display width.
+- The indentation of the first line is used for the whole table, so tables in list items keep
+  their place.
+
+### Limitations
+
+- A `|` inside a code span splits the cell, as in GitHub's renderer: escape it as `\|`.
+- A line of prose containing `|` right above or below a table is taken as part of it. Leave an
+  empty line between them, which Markdown needs anyway.
+- Text that isn't a table (no delimiter row and lines not starting with `|`) is left as is, and the
+  status line says there is no table to format.
+
+### Ideas
+
+- Format the table on save in Markdown files, as an opt-in setting.
+- Commands to add, delete and move columns, and to move between cells with `Tab`.

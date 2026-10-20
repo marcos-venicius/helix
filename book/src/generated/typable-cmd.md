@@ -89,6 +89,7 @@
 | `:run-shell-command`, `:sh`, `:!` | Run a shell command |
 | `:claude`, `:ai` | Toggle the Claude Code popup. With arguments, start a new session with the current file, line and selection as context and send them as the first message. |
 | `:git-log` | Open the git commit log picker. Enter lists the files changed by a commit, Enter on a file shows its diff. |
+| `:format-table` | Format the Markdown tables in the selections: pad the cells so the columns line up. A cursor inside a table formats the whole table. |
 | `:reset-diff-change`, `:diffget`, `:diffg` | Reset the diff change at the cursor position. |
 | `:clear-register` | Clear given register. If no argument is provided, clear all registers. |
 | `:set-register` | Set contents of the given register. |
