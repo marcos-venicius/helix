@@ -85,6 +85,30 @@ impl DiffProviderRegistry {
         });
     }
 
+    /// The changed files under `cwd`, like `for_each_changed_file` but blocking until they are all
+    /// listed. Errors about single files are logged and skipped.
+    pub fn changed_files(&self, cwd: &Path, trust_full: bool) -> Result<Vec<FileChange>> {
+        // report the error of the first provider, not the fallback's "no diff support"
+        let mut first_err = None;
+        for provider in &self.providers {
+            let changes = std::cell::RefCell::new(Vec::new());
+            let collect = |change: Result<FileChange>| {
+                match change {
+                    Ok(change) => changes.borrow_mut().push(change),
+                    Err(err) => log::debug!("{err:#?}"),
+                }
+                true
+            };
+            match provider.for_each_changed_file(cwd, trust_full, collect) {
+                Ok(()) => return Ok(changes.into_inner()),
+                Err(err) => {
+                    first_err.get_or_insert(err);
+                }
+            }
+        }
+        Err(first_err.unwrap_or_else(|| anyhow!("no diff provider returns success")))
+    }
+
     /// Fire-and-forget iteration over the commits reachable from HEAD, newest first. Runs
     /// everything in a background task. Keeps iterating until `f` returns `false`.
     pub fn for_each_commit(

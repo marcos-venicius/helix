@@ -278,6 +278,9 @@ pub struct ExplorerConfig {
     /// Expand the tree to the file of the current buffer and select it whenever the current buffer
     /// changes, while the panel isn't focused. Defaults to true.
     pub auto_reveal: bool,
+    /// Mark files changed in git (modified, added, untracked...) and the directories holding them.
+    /// Defaults to true.
+    pub git_status: bool,
 }
 
 impl Default for ExplorerConfig {
@@ -287,6 +290,7 @@ impl Default for ExplorerConfig {
             hide_gitignored: false,
             icons: true,
             auto_reveal: true,
+            git_status: true,
         }
     }
 }

@@ -15,7 +15,7 @@ code lives:
 | Side by side git diff | `helix-term/src/ui/diff_view.rs`, `helix-term/src/commands/diff_view.rs` |
 | Git commit log | `helix-term/src/commands/git_log.rs`, `open_commit` in `helix-term/src/commands/diff_view.rs`, `for_each_commit` / `commit_changes` / `file_at_commit` in `helix-vcs/src/git.rs` and `helix-vcs/src/lib.rs`, `CommitInfo` in `helix-vcs/src/commit.rs` |
 | Staged files in the changed files picker | `status()` and its helpers in `helix-vcs/src/git.rs`, `FileChange::Added` in `helix-vcs/src/status.rs` |
-| File explorer side panel | `helix-term/src/ui/explorer.rs` and `helix-term/src/ui/explorer/` (icons, git ignore rules); hooks in `EditorView` (`helix-term/src/ui/editor.rs`), `ExplorerConfig` in `helix-view/src/editor.rs`; benchmarks in `helix-term/benches/explorer.rs` |
+| File explorer side panel | `helix-term/src/ui/explorer.rs` and `helix-term/src/ui/explorer/` (icons, git ignore rules, git status markers); `changed_files` in `helix-vcs/src/lib.rs`; hooks in `EditorView` (`helix-term/src/ui/editor.rs`), `ExplorerConfig` in `helix-view/src/editor.rs`; benchmarks in `helix-term/benches/explorer.rs` |
 | Markdown table formatting | `helix-term/src/commands/markdown_table.rs` |
 
 ## Branches
@@ -120,8 +120,8 @@ the same spots:
   `Added` variant. If upstream changes `status()`, port their change onto our version and run
   `cargo test -p helix-vcs --features git`, which covers the staged cases. `get_diff_base`'s
   checkout filtering is factored into `to_worktree`, shared with `file_at_commit`.
-- `helix-vcs/src/lib.rs`, `helix-vcs/src/status.rs`: we add the commit log methods to
-  `DiffProviderRegistry` and `DiffProvider`, and `#[derive(Clone)]` to `FileChange`. Keep both
+- `helix-vcs/src/lib.rs`, `helix-vcs/src/status.rs`: we add the commit log methods and
+  `changed_files` (for the explorer) to `DiffProviderRegistry` and `DiffProvider`, and `#[derive(Clone)]` to `FileChange`. Keep both
   sides.
 - `helix-term/Cargo.toml`: we add a `bench` feature, `criterion` to the dev-dependencies and the
   `explorer` `[[bench]]`. Keep both sides.

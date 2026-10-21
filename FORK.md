@@ -180,6 +180,11 @@ is shown in bold. While the panel isn't focused, it follows the current buffer: 
 file (a picker, `:open`, `gd`, ...) expands the tree down to it and selects it, unless the file is
 inside a directory ignored by git (`target`, `node_modules`).
 
+Files changed in git are marked like in VS Code's explorer: the name takes the color of the change
+and a letter shows on the right, `M` modified, `A` added (staged), `U` untracked, `R` renamed and
+`!` in conflict. Directories holding changes, deleted files included, show a `●` in the color of
+their most important change (conflict, then modified, deleted, renamed, added, untracked).
+
 Not to be confused with upstream's `space e`, which opens the file explorer picker.
 
 ### Usage
@@ -187,7 +192,7 @@ Not to be confused with upstream's `space e`, which opens the file explorer pick
 | Keys | Action |
 | --- | --- |
 | `space E` | Open and focus the panel. With the panel open, focus it, or close it when it is already focused. |
-| `j`/`k`, arrows | Move. `C-d`/`C-u` move half a page, `g`/`G` go to the top/bottom. |
+| `j`/`k`, arrows | Move. `C-d`/`C-u` move half a page, `gg`/`ge` (or `G`) go to the top/bottom. |
 | `l`, `Right` | Expand a directory (or move into an expanded one), open a file. |
 | `h`, `Left` | Collapse a directory, or go to the parent directory. |
 | `Enter`, mouse click | Expand/collapse a directory, open a file. |
@@ -197,6 +202,10 @@ Not to be confused with upstream's `space e`, which opens the file explorer pick
 | `d`, then `y` | Delete the selected file or directory (directories are deleted recursively). Any other key or a click cancels. |
 | `R` | Read the whole tree from disk again. |
 | `H` | Show/hide git ignored files for this session. |
+| `zz`/`zc`, `zt`, `zb` | Scroll so the selected entry is in the center, at the top or at the bottom. |
+| `zj`/`zk` | Scroll down/up one row. |
+| `zh`/`zl`, shift + mouse wheel | Scroll sideways, to read names cut by the width of the panel. The git markers stay in place. |
+| `gh`/`gl` | Scroll sideways all the way to the start / to the end of the longest name on screen. |
 | `?` | Show the keys in the status line. |
 | `Esc`, `C-w l` | Give the focus back to the editor. From the leftmost view, `C-w h` focuses the panel again. |
 | `q` | Close the panel. |
@@ -223,6 +232,9 @@ listings of the expanded directories are kept: only the directories whose modifi
 (or their `.gitignore`'s, with everything below it) are read again. `R` reads everything again. When the working directory
 changes (`:cd`), the tree follows it on the next update.
 
+The git status is read in the background (the same as `space g`) on each of those updates and when
+a buffer is saved.
+
 ### Configuration
 
 ```toml
@@ -231,17 +243,21 @@ width = 30               # columns, at most half of the screen
 hide-gitignored = false  # hide git ignored files instead of dimming them
 icons = true             # file type icons; needs a Nerd Font, turn off otherwise
 auto-reveal = true       # follow the current buffer while the panel isn't focused
+git-status = true        # mark files changed in git and the directories holding them
 ```
 
 Theme scopes: `ui.explorer` (background, defaults to `ui.background`), `ui.explorer.ignored`
 (ignored entries, defaults to `ui.text.inactive`, or dim text), `ui.text.directory` (directories),
 `ui.selection` (selected entry while focused), `ui.cursorline.primary` (selected entry while not
-focused) and `ui.window` (separator).
+focused) and `ui.window` (separator). The git markers use the scopes of the changed files picker:
+`diff.plus` (added, untracked), `diff.delta` (modified), `diff.delta.moved` (renamed), `diff.minus`
+(deleted) and `diff.delta.conflict` (conflict).
 
 ### Limitations
 
 - The tree doesn't watch the disk: files created outside the panel show up on the next update
-  (focusing the panel or `R`).
+  (focusing the panel or `R`). The same goes for the git status after a git command run outside
+  the editor (`git commit`, `git checkout`).
 - Changes to the global git excludes file or `.git/info/exclude`, and to a `.gitignore` of a
   directory above the working directory, are only picked up by `R`.
 - One entry at a time: there is no multi-selection for moving or deleting several files.
@@ -257,7 +273,6 @@ focused) and `ui.window` (separator).
 ### Ideas
 
 - Copy and paste (`c`/`p`), and a multi-selection for batch moves and deletions.
-- Git status markers (modified, added, untracked) next to the entries.
 
 ## Markdown table formatting
 

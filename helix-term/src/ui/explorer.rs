@@ -1,6 +1,7 @@
 //! A file tree in a side panel on the left of the editor, toggled with `space E`. Files ignored by
-//! git are dimmed (or hidden with `editor.explorer.hide-gitignored`), and the panel can create,
-//! rename, move (cut and paste) and delete files.
+//! git are dimmed (or hidden with `editor.explorer.hide-gitignored`), files changed in git are
+//! marked (see [`git_status`]), and the panel can create, rename, move (cut and paste) and delete
+//! files.
 //!
 //! The panel lives in [`EditorView`], which shrinks the editor area to make room for it and hands
 //! it the keys while it is focused. Keys the panel doesn't use go to the editor keymap only when
@@ -14,6 +15,7 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use anyhow::bail;
+use helix_core::unicode::width::UnicodeWidthChar;
 use helix_core::Selection;
 use helix_view::document::Mode;
 use helix_view::editor::Action;
@@ -29,13 +31,22 @@ use crate::keymap::{KeyTrie, KeyTrieNode, Keymaps};
 use crate::ui::{self, EditorView, PromptEvent};
 use crate::{ctrl, key};
 
+mod git_status;
 mod gitignore;
 mod icons;
 
+use git_status::GitStatus;
 use gitignore::{DirRules, Matcher, Outer};
 
 const HELP: &str = "a: new (end with / for a directory)  r: rename  x: cut  p: paste  d: delete  \
-                    R: refresh  H: show/hide git ignored  q: close  esc: back to the editor";
+                    R: refresh  H: show/hide git ignored  g: goto  z: view  q: close  esc: back to the editor";
+
+const VIEW_HELP: &str = "z/c: center  t: top  b: bottom  j/k: scroll  h/l: scroll sideways";
+
+const GOTO_HELP: &str = "g: top  e: bottom  h: scroll to the start  l: scroll to the end";
+
+/// Columns moved by a sideways scroll: two levels of indentation.
+const SIDEWAYS: usize = 4;
 
 #[derive(Clone)]
 struct Node {
@@ -58,6 +69,11 @@ pub struct Explorer {
     expanded: HashSet<PathBuf>,
     cursor: usize,
     scroll: usize,
+    /// Columns of the entries scrolled out on the left.
+    hscroll: usize,
+    /// `z` or `g` was pressed, the next key completes the command (`zz`, `gl`...).
+    prefix: Option<char>,
+    git: GitStatus,
     /// Screen area of the panel and of its list of nodes in the last render, for mouse events.
     area: Rect,
     body: Rect,
@@ -106,6 +122,9 @@ impl Explorer {
             expanded: HashSet::new(),
             cursor: 0,
             scroll: 0,
+            hscroll: 0,
+            prefix: None,
+            git: GitStatus::default(),
             area: Rect::default(),
             body: Rect::default(),
             focused: true,
@@ -132,6 +151,7 @@ impl Explorer {
     pub fn unfocus(&mut self) {
         self.focused = false;
         self.confirm_delete = None;
+        self.prefix = None;
     }
 
     /// Width of the panel, leaving at least half of `available` to the editor.
@@ -162,6 +182,7 @@ impl Explorer {
         if editor.config().explorer.auto_reveal {
             self.follow(doc!(editor).path());
         }
+        self.git.update(&self.root, editor);
     }
 
     fn hide_ignored(&self, editor: &Editor) -> bool {
@@ -173,7 +194,8 @@ impl Explorer {
     }
 
     /// Updates the tree from disk, keeping the expanded directories and the selection. Only the
-    /// directories that changed since they were listed are read again.
+    /// directories that changed since they were listed are read again. The git status is always
+    /// read again, in the background.
     pub fn refresh(&mut self, editor: &Editor) {
         let cwd = helix_stdx::env::current_working_dir();
         if cwd != self.root {
@@ -183,10 +205,13 @@ impl Explorer {
             self.listings.clear();
             self.cursor = 0;
             self.scroll = 0;
+            self.hscroll = 0;
+            self.git = GitStatus::default();
         }
         drop_changed_listings(&mut self.listings);
         self.hiding = self.hide_ignored(editor);
         self.rebuild();
+        self.git.request(&self.root, editor);
     }
 
     /// Reads every directory again, for the changes `refresh` can't see (global git excludes,
@@ -399,13 +424,25 @@ impl Explorer {
             return Some(KeyResult::Handled);
         }
 
+        match self.prefix.take() {
+            Some('z') => {
+                self.view_key(key);
+                return Some(KeyResult::Handled);
+            }
+            Some(_) => {
+                self.goto_key(key);
+                return Some(KeyResult::Handled);
+            }
+            None => {}
+        }
+
         let half_page = (self.body.height as isize / 2).max(1);
         match key {
             key!('j') | key!(Down) => self.move_cursor(1),
             key!('k') | key!(Up) => self.move_cursor(-1),
             ctrl!('d') | key!(PageDown) => self.move_cursor(half_page),
             ctrl!('u') | key!(PageUp) => self.move_cursor(-half_page),
-            key!('g') | key!(Home) => self.cursor = 0,
+            key!(Home) => self.cursor = 0,
             key!('G') | key!(End) => self.move_cursor(isize::MAX),
             key!('l') | key!(Right) => self.expand(cx.editor),
             key!('h') | key!(Left) => self.collapse(),
@@ -441,6 +478,14 @@ impl Explorer {
                 self.flip_hidden = !self.flip_hidden;
                 self.refresh(cx.editor);
             }
+            key!('z') => {
+                self.prefix = Some('z');
+                cx.editor.set_status(VIEW_HELP);
+            }
+            key!('g') => {
+                self.prefix = Some('g');
+                cx.editor.set_status(GOTO_HELP);
+            }
             key!('?') => cx.editor.set_status(HELP),
             key!(Esc) => self.unfocus(),
             key!('q') => return Some(KeyResult::Close),
@@ -452,6 +497,44 @@ impl Explorer {
             _ => {}
         }
         Some(KeyResult::Handled)
+    }
+
+    /// The key after `z`, like the editor's view mode.
+    fn view_key(&mut self, key: KeyEvent) {
+        let height = (self.body.height as usize).max(1);
+        match key {
+            key!('z') | key!('c') => self.scroll = self.cursor.saturating_sub(height / 2),
+            key!('t') => self.scroll = self.cursor,
+            key!('b') => self.scroll = (self.cursor + 1).saturating_sub(height),
+            key!('j') | key!(Down) => self.scroll_by(1),
+            key!('k') | key!(Up) => self.scroll_by(-1),
+            key!('h') | key!(Left) => self.hscroll = self.hscroll.saturating_sub(SIDEWAYS),
+            key!('l') | key!(Right) => self.hscroll += SIDEWAYS,
+            _ => {}
+        }
+    }
+
+    /// The key after `g`, like the editor's goto mode.
+    fn goto_key(&mut self, key: KeyEvent) {
+        match key {
+            key!('g') => self.cursor = 0,
+            key!('e') => self.move_cursor(isize::MAX),
+            key!('h') => self.hscroll = 0,
+            // Brought back to the end of the longest name by `render`.
+            key!('l') => self.hscroll = usize::MAX,
+            _ => {}
+        }
+    }
+
+    /// Scrolls the list by `delta` rows, dragging the cursor along when it would leave the screen.
+    fn scroll_by(&mut self, delta: isize) {
+        let height = (self.body.height as usize).max(1);
+        let last = self.nodes.len().saturating_sub(1);
+        self.scroll = self.scroll.saturating_add_signed(delta).min(last);
+        self.cursor = self
+            .cursor
+            .clamp(self.scroll, self.scroll + height - 1)
+            .min(last);
     }
 
     fn relative<'a>(&self, path: &'a Path) -> std::borrow::Cow<'a, str> {
@@ -597,9 +680,12 @@ impl Explorer {
         if self.confirm_delete.take().is_some() {
             editor.set_status("Delete cancelled");
         }
+        self.prefix = None;
         match event.kind {
             MouseEventKind::ScrollDown => self.move_cursor(3),
             MouseEventKind::ScrollUp => self.move_cursor(-3),
+            MouseEventKind::ScrollRight => self.hscroll += SIDEWAYS,
+            MouseEventKind::ScrollLeft => self.hscroll = self.hscroll.saturating_sub(SIDEWAYS),
             MouseEventKind::Down(MouseButton::Left) => {
                 // Find the clicked entry in what is on screen, before `focus` reloads the tree and
                 // possibly shifts the rows.
@@ -699,12 +785,15 @@ impl Explorer {
 
         let current = doc!(editor).path();
         let show_icons = editor.config().explorer.icons;
-        for (index, node) in self.nodes.iter().enumerate().skip(self.scroll).take(height) {
-            let y = body.y + (index - self.scroll) as u16;
-            if index == self.cursor {
-                surface.set_style(Rect::new(body.x, y, body.width, 1), cursor);
-            }
+        let show_git = editor.config().explorer.git_status;
+        let mut rows = Vec::with_capacity(height);
+        for node in self.nodes.iter().skip(self.scroll).take(height) {
+            let mark = show_git.then(|| self.git.get(&node.path)).flatten();
             let mut style = if node.is_dir { directory } else { text };
+            if let Some(mark) = mark {
+                // The color of the change, but not its background or modifiers.
+                style.fg = mark.style(theme).fg.or(style.fg);
+            }
             if node.ignored {
                 style = style.patch(ignored);
             }
@@ -720,8 +809,7 @@ impl Explorer {
                 (true, false) => "▸ ",
                 (false, _) => "  ",
             };
-            let indent = format!(" {}{chevron}", "  ".repeat(node.depth));
-            let (mut x, _) = surface.set_stringn(body.x, y, &indent, body.width as usize, style);
+            let mut segments = vec![(format!(" {}{chevron}", "  ".repeat(node.depth)), style)];
             if show_icons {
                 let (glyph, color) = if node.is_dir {
                     icons::directory(expanded)
@@ -732,14 +820,67 @@ impl Explorer {
                 if node.ignored {
                     icon_style = icon_style.patch(ignored);
                 }
-                let width = body.right().saturating_sub(x) as usize;
-                (x, _) = surface.set_stringn(x, y, &format!("{glyph} "), width, icon_style);
+                segments.push((format!("{glyph} "), icon_style));
             }
             let slash = if node.is_dir { "/" } else { "" };
-            let width = body.right().saturating_sub(x) as usize;
-            surface.set_stringn(x, y, &format!("{}{slash}", node.name), width, style);
+            segments.push((format!("{}{slash}", node.name), style));
+            rows.push((segments, mark, node.is_dir));
+        }
+
+        // Room for the git markers on the right, when there are any.
+        let marker_width = if rows.iter().any(|(_, mark, _)| mark.is_some()) {
+            2
+        } else {
+            0
+        };
+        let names = body.clip_right(marker_width);
+        let widest = rows
+            .iter()
+            .map(|(segments, _, _)| segments.iter().map(|(text, _)| width(text)).sum())
+            .max()
+            .unwrap_or(0);
+        self.hscroll = self.hscroll.min(widest.saturating_sub(names.width as usize));
+
+        for (row, (segments, mark, is_dir)) in rows.into_iter().enumerate() {
+            let y = body.y + row as u16;
+            if self.scroll + row == self.cursor {
+                surface.set_style(Rect::new(body.x, y, body.width, 1), cursor);
+            }
+            let mut x = names.x;
+            let mut skip = self.hscroll;
+            for (text, style) in &segments {
+                let visible = skip_columns(text, &mut skip);
+                let width = names.right().saturating_sub(x) as usize;
+                (x, _) = surface.set_stringn(x, y, visible, width, *style);
+            }
+            if let Some(mark) = mark {
+                let marker = if is_dir { "●" } else { mark.letter() };
+                surface.set_stringn(
+                    names.right(),
+                    y,
+                    &format!("{marker} "),
+                    marker_width as usize,
+                    mark.style(theme),
+                );
+            }
         }
     }
+}
+
+fn width(text: &str) -> usize {
+    text.chars().map(|ch| ch.width().unwrap_or(0)).sum()
+}
+
+/// What remains of `text` after its first `skip` columns, taking them off `skip`. A wide character
+/// cut in half is dropped.
+fn skip_columns<'a>(text: &'a str, skip: &mut usize) -> &'a str {
+    for (index, ch) in text.char_indices() {
+        if *skip == 0 {
+            return &text[index..];
+        }
+        *skip = skip.saturating_sub(ch.width().unwrap_or(0));
+    }
+    ""
 }
 
 fn focus_target(editor: &Editor) -> (ViewId, DocumentId, Selection) {
@@ -1310,6 +1451,59 @@ mod tests {
             .map(|(name, ignored)| (name.to_string(), *ignored))
             .collect();
         assert_eq!(names(&tree), expected);
+    }
+
+    #[test]
+    fn skips_columns_of_wide_characters() {
+        let mut skip = 3;
+        assert_eq!(skip_columns("ab", &mut skip), "");
+        assert_eq!(skip, 1);
+        assert_eq!(skip_columns("日本x", &mut skip), "本x");
+        assert_eq!(skip, 0);
+        // Half of a wide character is dropped with it.
+        let mut skip = 1;
+        assert_eq!(skip_columns("日本", &mut skip), "本");
+    }
+
+    #[test]
+    fn view_keys_scroll_like_the_editor() {
+        let dir = repo();
+        let mut explorer = Explorer::empty(dir.path().to_path_buf());
+        explorer.nodes = (0..20)
+            .map(|index| Node {
+                path: dir.path().join(index.to_string()),
+                name: index.to_string(),
+                depth: 0,
+                is_dir: false,
+                ignored: false,
+            })
+            .collect();
+        explorer.body = Rect::new(0, 0, 10, 6);
+        explorer.cursor = 10;
+        explorer.view_key(key!('z'));
+        assert_eq!(explorer.scroll, 7);
+        explorer.view_key(key!('t'));
+        assert_eq!(explorer.scroll, 10);
+        explorer.view_key(key!('b'));
+        assert_eq!(explorer.scroll, 5);
+        // Scrolling drags the cursor along when it would leave the screen.
+        explorer.view_key(key!('j'));
+        assert_eq!((explorer.scroll, explorer.cursor), (6, 10));
+        explorer.scroll = 10;
+        explorer.view_key(key!('j'));
+        assert_eq!((explorer.scroll, explorer.cursor), (11, 11));
+        explorer.view_key(key!('l'));
+        explorer.view_key(key!('l'));
+        explorer.view_key(key!('h'));
+        assert_eq!(explorer.hscroll, SIDEWAYS);
+        explorer.goto_key(key!('l'));
+        assert_eq!(explorer.hscroll, usize::MAX);
+        explorer.goto_key(key!('h'));
+        assert_eq!(explorer.hscroll, 0);
+        explorer.goto_key(key!('e'));
+        assert_eq!(explorer.cursor, 19);
+        explorer.goto_key(key!('g'));
+        assert_eq!(explorer.cursor, 0);
     }
 
     #[test]
