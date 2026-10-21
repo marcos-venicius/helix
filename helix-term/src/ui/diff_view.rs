@@ -380,11 +380,20 @@ pub struct DiffView {
     /// Run when Enter opens the file, to close what the view was opened from.
     on_open: Option<OnOpen>,
     tab_width: usize,
+    /// Long lines wrap instead of scrolling sideways, like `editor.soft-wrap`.
+    wrap: bool,
+    /// Columns of text on each side, from the last render.
+    text_widths: (usize, usize),
+    /// Width of the longest line of both sides.
+    widest: usize,
     scroll: usize,
     hscroll: usize,
-    /// Rows of the diff that fit on screen, from the last render.
+    /// Screen lines of the diff, from the last render.
     height: usize,
-    /// First key of a two key sequence (`]c` / `[c`).
+    /// Rows of the diff that fit on screen, from the last render. Fewer than `height` when lines
+    /// wrap.
+    visible: usize,
+    /// First key of a two key sequence (`]c` / `[c`, `gg`, `gh`...).
     pending: Option<char>,
     /// Index of the current hunk in `hunks`. Tracked explicitly because several hunks can map
     /// to the same scroll position (near the top or bottom, or when everything fits on screen).
@@ -397,6 +406,13 @@ impl DiffView {
         let scroll = hunks
             .first()
             .map_or(0, |hunk| hunk.saturating_sub(HUNK_CONTEXT));
+        let tab_width = tab_width.max(1);
+        let widest = [&left, &right]
+            .into_iter()
+            .flat_map(|side| (0..side.lines.len()).map(move |line| side.line(line)))
+            .map(|line| layout(line, tab_width, None, |_, _, _, _, _| true).1)
+            .max()
+            .unwrap_or(0);
         DiffView {
             left,
             right,
@@ -404,10 +420,14 @@ impl DiffView {
             hunks,
             path,
             on_open: None,
-            tab_width: tab_width.max(1),
+            tab_width,
+            wrap: false,
+            text_widths: (0, 0),
+            widest,
             scroll,
             hscroll: 0,
             height: 0,
+            visible: 0,
             pending: None,
             current: 0,
         }
@@ -419,13 +439,50 @@ impl DiffView {
         self
     }
 
+    /// Wraps long lines instead of scrolling them sideways.
+    pub fn with_soft_wrap(mut self, wrap: bool) -> DiffView {
+        self.wrap = wrap;
+        self
+    }
+
     /// Whether the two sides differ at all.
     pub fn has_changes(&self) -> bool {
         !self.hunks.is_empty()
     }
 
     fn max_scroll(&self) -> usize {
-        self.rows.len().saturating_sub(self.height.max(1))
+        if !self.wrap {
+            return self.rows.len().saturating_sub(self.height.max(1));
+        }
+        // The first row from which the rest fills the screen.
+        let mut lines = 0;
+        for (index, row) in self.rows.iter().enumerate().rev() {
+            lines += self.row_height(row);
+            if lines > self.height.max(1) {
+                return index + 1;
+            }
+        }
+        0
+    }
+
+    /// Screen lines taken by `row`: more than one when one of its lines wraps.
+    fn row_height(&self, row: &Row) -> usize {
+        let (left_width, right_width) = self.text_widths;
+        if !self.wrap || left_width == 0 || right_width == 0 {
+            return 1;
+        }
+        let height = |side: &Side, line: Option<usize>, width: usize| {
+            line.map_or(1, |line| {
+                layout(side.line(line), self.tab_width, Some(width), |_, _, _, _, _| true).0
+            })
+        };
+        height(&self.left, row.left, left_width).max(height(&self.right, row.right, right_width))
+    }
+
+    /// The sideways scroll that shows the end of the longest line.
+    fn max_hscroll(&self) -> usize {
+        let (left_width, right_width) = self.text_widths;
+        self.widest.saturating_sub(left_width.min(right_width))
     }
 
     fn scroll_by(&mut self, delta: isize) {
@@ -436,7 +493,7 @@ impl DiffView {
     /// hunk in view (or the closest one) becomes the current one.
     fn scroll_to(&mut self, scroll: usize) {
         self.scroll = scroll.min(self.max_scroll());
-        let in_view = |hunk: usize| hunk >= self.scroll && hunk < self.scroll + self.height;
+        let in_view = |hunk: usize| hunk >= self.scroll && hunk < self.scroll + self.visible;
         if self
             .hunks
             .get(self.current)
@@ -516,8 +573,13 @@ impl DiffView {
         let page = self.height.max(1) as isize;
 
         if let Some(prefix) = self.pending.take() {
-            if key.code == KeyCode::Char('c') {
-                self.jump_to_hunk(prefix == ']');
+            match (prefix, key.code) {
+                (']' | '[', KeyCode::Char('c')) => self.jump_to_hunk(prefix == ']'),
+                ('g', KeyCode::Char('g')) => self.scroll_to(0),
+                ('g', KeyCode::Char('e')) => self.scroll_to(usize::MAX),
+                ('g', KeyCode::Char('h')) => self.hscroll = 0,
+                ('g', KeyCode::Char('l')) => self.hscroll = self.max_hscroll(),
+                _ => {}
             }
             return EventResult::Consumed(None);
         }
@@ -535,14 +597,21 @@ impl DiffView {
             KeyCode::Char('k') | KeyCode::Up => self.scroll_by(-1),
             KeyCode::PageDown | KeyCode::Char(' ') => self.scroll_by(page),
             KeyCode::PageUp => self.scroll_by(-page),
-            KeyCode::Char('g') | KeyCode::Home => self.scroll_to(0),
+            KeyCode::Home => self.scroll_to(0),
             KeyCode::Char('G') | KeyCode::End => self.scroll_to(usize::MAX),
             KeyCode::Char('n') => self.jump_to_hunk(true),
             KeyCode::Char('N') => self.jump_to_hunk(false),
-            KeyCode::Char(c @ (']' | '[')) => self.pending = Some(c),
+            KeyCode::Char(c @ (']' | '[' | 'g')) => self.pending = Some(c),
             KeyCode::Char('h') | KeyCode::Left => self.hscroll = self.hscroll.saturating_sub(4),
-            KeyCode::Char('l') | KeyCode::Right => self.hscroll += 4,
+            KeyCode::Char('l') | KeyCode::Right => {
+                self.hscroll = (self.hscroll + 4).min(self.max_hscroll())
+            }
             KeyCode::Char('0') => self.hscroll = 0,
+            KeyCode::Char('w') => {
+                self.wrap = !self.wrap;
+                self.hscroll = 0;
+                self.scroll_to(self.scroll);
+            }
             _ => {}
         }
         EventResult::Consumed(None)
@@ -554,6 +623,7 @@ impl DiffView {
         surface: &mut Surface,
         area: Rect,
         y: u16,
+        height: u16,
         side: &Side,
         line: Option<usize>,
         kind: RowKind,
@@ -565,7 +635,9 @@ impl DiffView {
     ) {
         let Some(line) = line else {
             let filler = "╱".repeat(area.width as usize);
-            surface.set_stringn(area.x, y, &filler, area.width as usize, palette.filler);
+            for y in y..y + height {
+                surface.set_stringn(area.x, y, &filler, area.width as usize, palette.filler);
+            }
             return;
         };
 
@@ -575,7 +647,7 @@ impl DiffView {
             (_, false) => Some(&palette.plus),
         };
         let line_style = change.map_or(Style::default(), |change| change.line);
-        surface.set_style(Rect::new(area.x, y, area.width, 1), line_style);
+        surface.set_style(Rect::new(area.x, y, area.width, height), line_style);
 
         let sign = match change {
             None => ' ',
@@ -615,41 +687,89 @@ impl DiffView {
         let word_style = change.map_or(Style::default(), |change| change.word);
         let highlights = &side.highlights[line];
         let mut next_highlight = 0;
-        let mut col = 0;
-        for (byte, c) in side.line(line).char_indices() {
-            while next_highlight < highlights.len() && highlights[next_highlight].0.end <= byte {
-                next_highlight += 1;
-            }
-            let mut style = base;
-            if let Some((range, highlight)) = highlights.get(next_highlight) {
-                if range.contains(&byte) {
-                    style = style.patch(*highlight);
+        let (wrap, hscroll) = match self.wrap {
+            true => (Some(text_width), 0),
+            false => (None, self.hscroll),
+        };
+        layout(
+            side.line(line),
+            self.tab_width,
+            wrap,
+            |byte, symbol, width, row, col| {
+                if row >= height as usize || col >= hscroll + text_width {
+                    return false;
                 }
-            }
-            if words.iter().any(|range| range.contains(&byte)) {
-                style = style.patch(word_style);
-            }
+                // only draw characters that are fully inside the horizontally scrolled window
+                if col < hscroll || col + width > hscroll + text_width {
+                    return true;
+                }
+                while next_highlight < highlights.len() && highlights[next_highlight].0.end <= byte
+                {
+                    next_highlight += 1;
+                }
+                let mut style = base;
+                if let Some((range, highlight)) = highlights.get(next_highlight) {
+                    if range.contains(&byte) {
+                        style = style.patch(*highlight);
+                    }
+                }
+                if words.iter().any(|range| range.contains(&byte)) {
+                    style = style.patch(word_style);
+                }
+                let x = text_x + (col - hscroll) as u16;
+                surface.set_stringn(x, y + row as u16, symbol, width, style);
+                true
+            },
+        );
+    }
+}
 
-            let (symbol, width) = if c == '\t' {
-                let width = self.tab_width - col % self.tab_width;
-                (" ".repeat(width), width)
-            } else {
-                (c.to_string(), c.width().unwrap_or(0))
-            };
-            if width == 0 {
-                continue;
+/// Lays out the characters of `line` on screen, wrapping at `wrap` columns if set, and calls
+/// `draw` with the byte offset of each one, what to draw (tabs become spaces), its width and its
+/// screen line and column from the start of the line, until it returns `false`. Returns the screen
+/// lines taken and the width of the last one.
+fn layout(
+    line: &str,
+    tab_width: usize,
+    wrap: Option<usize>,
+    mut draw: impl FnMut(usize, &str, usize, usize, usize) -> bool,
+) -> (usize, usize) {
+    let mut row = 0;
+    let mut col = 0;
+    let mut buf = [0; 4];
+    let mut tab = String::new();
+    for (byte, c) in line.char_indices() {
+        let width = |col: usize| match c {
+            '\t' => tab_width - col % tab_width,
+            c => c.width().unwrap_or(0),
+        };
+        let mut char_width = width(col);
+        if char_width == 0 {
+            continue;
+        }
+        if let Some(wrap) = wrap {
+            if col > 0 && col + char_width > wrap {
+                row += 1;
+                col = 0;
+                char_width = width(0);
             }
-            // only draw characters that are fully inside the horizontally scrolled window
-            if col >= self.hscroll && col + width <= self.hscroll + text_width {
-                let x = text_x + (col - self.hscroll) as u16;
-                surface.set_stringn(x, y, &symbol, width, style);
-            }
-            col += width;
-            if col >= self.hscroll + text_width {
-                break;
+            if c == '\t' {
+                char_width = char_width.min(wrap);
             }
         }
+        let symbol = if c == '\t' {
+            tab.clear();
+            tab.extend(std::iter::repeat_n(' ', char_width));
+            tab.as_str()
+        } else {
+            c.encode_utf8(&mut buf)
+        };
+        if !draw(byte, symbol, char_width, row, col) {
+            break;
+        }
+        col += char_width;
     }
+    (row + 1, col)
 }
 
 impl Component for DiffView {
@@ -679,8 +799,6 @@ impl Component for DiffView {
         }
 
         let body = Rect::new(area.x, area.y + 1, area.width, area.height - 2);
-        self.height = body.height as usize;
-        self.scroll = self.scroll.min(self.max_scroll());
 
         let half = (area.width - 1) / 2;
         let left_area = Rect::new(area.x, body.y, half, body.height);
@@ -694,6 +812,12 @@ impl Component for DiffView {
             .max(1)
             .to_string()
             .len();
+        // the gutter: line number, a space, the sign and a space
+        let text_width = |area: Rect| (area.width as usize).saturating_sub(number_width + 3);
+        self.text_widths = (text_width(left_area), text_width(right_area));
+        self.height = body.height as usize;
+        self.scroll = self.scroll.min(self.max_scroll());
+        self.hscroll = self.hscroll.min(self.max_hscroll());
 
         // header with the title of each side
         surface.set_style(Rect::new(area.x, area.y, area.width, 1), palette.title);
@@ -713,17 +837,19 @@ impl Component for DiffView {
         );
 
         let current_rows = self.current_rows();
-        for (i, row) in self.rows[self.scroll..]
-            .iter()
-            .take(self.height)
-            .enumerate()
-        {
-            let y = body.y + i as u16;
+        let mut y = body.y;
+        let mut visible = 0;
+        for (i, row) in self.rows[self.scroll..].iter().enumerate() {
+            if y >= body.bottom() {
+                break;
+            }
+            let height = (self.row_height(row) as u16).min(body.bottom() - y);
             let is_current = current_rows.contains(&(self.scroll + i));
             self.render_cell(
                 surface,
                 left_area,
                 y,
+                height,
                 &self.left,
                 row.left,
                 row.kind,
@@ -737,6 +863,7 @@ impl Component for DiffView {
                 surface,
                 right_area,
                 y,
+                height,
                 &self.right,
                 row.right,
                 row.kind,
@@ -746,7 +873,10 @@ impl Component for DiffView {
                 number_width,
                 &palette,
             );
+            y += height;
+            visible += 1;
         }
+        self.visible = visible.max(1);
         for y in body.y..body.bottom() {
             surface.set_stringn(separator_x, y, "│", 1, palette.separator);
         }
@@ -755,7 +885,7 @@ impl Component for DiffView {
         let footer_y = area.bottom() - 1;
         surface.set_style(Rect::new(area.x, footer_y, area.width, 1), palette.hint);
         let footer = format!(
-            " hunk {}/{} · n/N or ]c/[c next/prev hunk · j/k scroll · h/l pan · enter open at hunk · q close",
+            " hunk {}/{} · n/N or ]c/[c next/prev hunk · j/k scroll · h/l pan · w wrap · enter open at hunk · q close",
             self.current + 1,
             self.hunks.len(),
         );
@@ -780,6 +910,70 @@ mod test {
         rows.iter()
             .map(|row| (row.kind, row.left, row.right))
             .collect()
+    }
+
+    fn positions(line: &str, wrap: Option<usize>) -> Vec<(String, usize, usize)> {
+        let mut cells = Vec::new();
+        layout(line, 4, wrap, |_, symbol, _, row, col| {
+            cells.push((symbol.to_string(), row, col));
+            true
+        });
+        cells
+    }
+
+    #[test]
+    fn wraps_long_lines() {
+        assert_eq!(layout("abcdefg", 4, Some(3), |_, _, _, _, _| true), (3, 1));
+        assert_eq!(layout("abcdefg", 4, None, |_, _, _, _, _| true), (1, 7));
+        assert_eq!(layout("", 4, Some(3), |_, _, _, _, _| true), (1, 0));
+        // A wide character that doesn't fit goes to the next line whole.
+        assert_eq!(
+            positions("ab日", Some(3)),
+            [
+                ("a".into(), 0, 0),
+                ("b".into(), 0, 1),
+                ("日".into(), 1, 0)
+            ]
+        );
+        // Tabs reach the next tab stop, and start over after a wrap.
+        assert_eq!(
+            positions("a\tb\t", Some(5)),
+            [
+                ("a".into(), 0, 0),
+                ("   ".into(), 0, 1),
+                ("b".into(), 0, 4),
+                ("    ".into(), 1, 0)
+            ]
+        );
+    }
+
+    #[test]
+    fn wrapped_rows_take_several_lines() {
+        let editor_less_side = |text: &str| Side {
+            title: String::new(),
+            lines: line_ranges(text),
+            highlights: vec![Vec::new(); line_ranges(text).len()],
+            text: text.to_string(),
+        };
+        let before = "short\nshort\nshort\n";
+        let after = "short\na much longer line\nshort\n";
+        let mut view = DiffView::new(
+            editor_less_side(before),
+            editor_less_side(after),
+            None,
+            4,
+        )
+        .with_soft_wrap(true);
+        view.text_widths = (6, 6);
+        view.height = 3;
+        let heights: Vec<usize> = view.rows.iter().map(|row| view.row_height(row)).collect();
+        // The changed line is paired with the one it replaced.
+        assert_eq!(heights, [1, 3, 1]);
+        // From row 1, the last rows take 4 lines: row 2 is the first whose rest fits.
+        assert_eq!(view.max_scroll(), 2);
+        view.wrap = false;
+        assert_eq!(view.max_scroll(), 0);
+        assert_eq!(view.max_hscroll(), "a much longer line".len() - 6);
     }
 
     #[test]
