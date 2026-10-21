@@ -39,9 +39,11 @@ use git_status::GitStatus;
 use gitignore::{DirRules, Matcher, Outer};
 
 const HELP: &str = "a: new (end with / for a directory)  r: rename  x: cut  p: paste  d: delete  \
-                    R: refresh  H: show/hide git ignored  z: view  q: close  esc: back to the editor";
+                    R: refresh  H: show/hide git ignored  g: goto  z: view  q: close  esc: back to the editor";
 
 const VIEW_HELP: &str = "z/c: center  t: top  b: bottom  j/k: scroll  h/l: scroll sideways";
+
+const GOTO_HELP: &str = "g: top  e: bottom  h: scroll to the start  l: scroll to the end";
 
 /// Columns moved by a sideways scroll: two levels of indentation.
 const SIDEWAYS: usize = 4;
@@ -69,8 +71,8 @@ pub struct Explorer {
     scroll: usize,
     /// Columns of the entries scrolled out on the left.
     hscroll: usize,
-    /// `z` was pressed, the next key is a view command (`zz`, `zh`...).
-    view_mode: bool,
+    /// `z` or `g` was pressed, the next key completes the command (`zz`, `gl`...).
+    prefix: Option<char>,
     git: GitStatus,
     /// Screen area of the panel and of its list of nodes in the last render, for mouse events.
     area: Rect,
@@ -121,7 +123,7 @@ impl Explorer {
             cursor: 0,
             scroll: 0,
             hscroll: 0,
-            view_mode: false,
+            prefix: None,
             git: GitStatus::default(),
             area: Rect::default(),
             body: Rect::default(),
@@ -149,7 +151,7 @@ impl Explorer {
     pub fn unfocus(&mut self) {
         self.focused = false;
         self.confirm_delete = None;
-        self.view_mode = false;
+        self.prefix = None;
     }
 
     /// Width of the panel, leaving at least half of `available` to the editor.
@@ -422,9 +424,16 @@ impl Explorer {
             return Some(KeyResult::Handled);
         }
 
-        if std::mem::take(&mut self.view_mode) {
-            self.view_key(key);
-            return Some(KeyResult::Handled);
+        match self.prefix.take() {
+            Some('z') => {
+                self.view_key(key);
+                return Some(KeyResult::Handled);
+            }
+            Some(_) => {
+                self.goto_key(key);
+                return Some(KeyResult::Handled);
+            }
+            None => {}
         }
 
         let half_page = (self.body.height as isize / 2).max(1);
@@ -433,7 +442,7 @@ impl Explorer {
             key!('k') | key!(Up) => self.move_cursor(-1),
             ctrl!('d') | key!(PageDown) => self.move_cursor(half_page),
             ctrl!('u') | key!(PageUp) => self.move_cursor(-half_page),
-            key!('g') | key!(Home) => self.cursor = 0,
+            key!(Home) => self.cursor = 0,
             key!('G') | key!(End) => self.move_cursor(isize::MAX),
             key!('l') | key!(Right) => self.expand(cx.editor),
             key!('h') | key!(Left) => self.collapse(),
@@ -470,8 +479,12 @@ impl Explorer {
                 self.refresh(cx.editor);
             }
             key!('z') => {
-                self.view_mode = true;
+                self.prefix = Some('z');
                 cx.editor.set_status(VIEW_HELP);
+            }
+            key!('g') => {
+                self.prefix = Some('g');
+                cx.editor.set_status(GOTO_HELP);
             }
             key!('?') => cx.editor.set_status(HELP),
             key!(Esc) => self.unfocus(),
@@ -497,6 +510,18 @@ impl Explorer {
             key!('k') | key!(Up) => self.scroll_by(-1),
             key!('h') | key!(Left) => self.hscroll = self.hscroll.saturating_sub(SIDEWAYS),
             key!('l') | key!(Right) => self.hscroll += SIDEWAYS,
+            _ => {}
+        }
+    }
+
+    /// The key after `g`, like the editor's goto mode.
+    fn goto_key(&mut self, key: KeyEvent) {
+        match key {
+            key!('g') => self.cursor = 0,
+            key!('e') => self.move_cursor(isize::MAX),
+            key!('h') => self.hscroll = 0,
+            // Brought back to the end of the longest name by `render`.
+            key!('l') => self.hscroll = usize::MAX,
             _ => {}
         }
     }
@@ -655,7 +680,7 @@ impl Explorer {
         if self.confirm_delete.take().is_some() {
             editor.set_status("Delete cancelled");
         }
-        self.view_mode = false;
+        self.prefix = None;
         match event.kind {
             MouseEventKind::ScrollDown => self.move_cursor(3),
             MouseEventKind::ScrollUp => self.move_cursor(-3),
@@ -1471,6 +1496,14 @@ mod tests {
         explorer.view_key(key!('l'));
         explorer.view_key(key!('h'));
         assert_eq!(explorer.hscroll, SIDEWAYS);
+        explorer.goto_key(key!('l'));
+        assert_eq!(explorer.hscroll, usize::MAX);
+        explorer.goto_key(key!('h'));
+        assert_eq!(explorer.hscroll, 0);
+        explorer.goto_key(key!('e'));
+        assert_eq!(explorer.cursor, 19);
+        explorer.goto_key(key!('g'));
+        assert_eq!(explorer.cursor, 0);
     }
 
     #[test]

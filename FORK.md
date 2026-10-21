@@ -184,7 +184,7 @@ Not to be confused with upstream's `space e`, which opens the file explorer pick
 | Keys | Action |
 | --- | --- |
 | `space E` | Open and focus the panel. With the panel open, focus it, or close it when it is already focused. |
-| `j`/`k`, arrows | Move. `C-d`/`C-u` move half a page, `g`/`G` go to the top/bottom. |
+| `j`/`k`, arrows | Move. `C-d`/`C-u` move half a page, `gg`/`ge` (or `G`) go to the top/bottom. |
 | `l`, `Right` | Expand a directory (or move into an expanded one), open a file. |
 | `h`, `Left` | Collapse a directory, or go to the parent directory. |
 | `Enter`, mouse click | Expand/collapse a directory, open a file. |
@@ -197,6 +197,7 @@ Not to be confused with upstream's `space e`, which opens the file explorer pick
 | `zz`/`zc`, `zt`, `zb` | Scroll so the selected entry is in the center, at the top or at the bottom. |
 | `zj`/`zk` | Scroll down/up one row. |
 | `zh`/`zl`, shift + mouse wheel | Scroll sideways, to read names cut by the width of the panel. The git markers stay in place. |
+| `gh`/`gl` | Scroll sideways all the way to the start / to the end of the longest name on screen. |
 | `?` | Show the keys in the status line. |
 | `Esc`, `C-w l` | Give the focus back to the editor. From the leftmost view, `C-w h` focuses the panel again. |
 | `q` | Close the panel. |
