@@ -64,7 +64,8 @@ fn head_diff(
 
     let left = Side::new(left_title, base, base_path, editor);
     let right = Side::new(right_title, current, path, editor);
-    let view = DiffView::new(left, right, exists.then(|| path.to_path_buf()), tab_width);
+    let view = DiffView::new(left, right, exists.then(|| path.to_path_buf()), tab_width)
+        .with_soft_wrap(soft_wrap(editor, path));
     if !view.has_changes() {
         editor.set_status(format!("No changes in {}", relative(path)));
         return Ok(None);
@@ -168,6 +169,7 @@ pub(crate) fn open_commit(
         path.exists().then_some(path.clone()),
         tab_width,
     )
+    .with_soft_wrap(soft_wrap(editor, &path))
     // the commit's files picker and the commit picker below it
     .with_on_open(|compositor| {
         compositor.remove(picker::ID);
@@ -179,4 +181,19 @@ pub(crate) fn open_commit(
     }
     compositor.push(Box::new(view));
     Ok(())
+}
+
+/// Whether lines of `path` wrap in the editor: the setting of its buffer when it is open, else
+/// `soft-wrap.enable` of its language, else of the editor.
+fn soft_wrap(editor: &Editor, path: &Path) -> bool {
+    if let Some(doc) = editor.document_by_path(path) {
+        // any width wide enough to wrap
+        return doc.text_format(1000, None).soft_wrap;
+    }
+    let loader = editor.syn_loader.load();
+    loader
+        .language_for_filename(path)
+        .and_then(|language| loader.language(language).config().soft_wrap.as_ref()?.enable)
+        .or(editor.config().soft_wrap.enable)
+        .unwrap_or(false)
 }

@@ -91,8 +91,10 @@ Inside the diff:
 | --- | --- |
 | `n` / `N`, `]c` / `[c` | Next / previous hunk |
 | `j` / `k`, `C-d` / `C-u`, `C-f` / `C-b`, `PageDown` / `PageUp`, mouse wheel | Scroll |
-| `g` / `G` | Top / bottom |
+| `gg` / `ge`, `G` | Top / bottom |
 | `h` / `l`, `0` | Scroll horizontally, back to the start of the line |
+| `gh` / `gl` | Scroll horizontally all the way to the start / to the end of the longest line |
+| `w` | Wrap long lines, or scroll them horizontally again |
 | `Enter` | Close the diff (and the picker it was opened from) and open the file at the current hunk |
 | `q`, `Esc` | Close |
 
@@ -100,9 +102,15 @@ The footer shows the current hunk (e.g. `hunk 2/5`), and its line numbers are bo
 (untracked or staged) only have a right side, and deleted files only have a left side. Renamed files
 are compared with their old path in HEAD.
 
+Long lines wrap when soft wrap is on for the file, as in the editor: the setting of its buffer when it
+is open, otherwise `soft-wrap.enable` of its language or of `[editor.soft-wrap]`. Continuation lines
+have no line number, and scrolling goes one screen line at a time, so a line taller than the screen
+can be read whole. `w` switches between wrapping and horizontal scrolling.
+
 ### Limitations
 
 - Binary files can't be shown.
+- Lines wrap at the last column, not at word boundaries, and without the `wrap-indicator`.
 - A line ending change (CRLF ↔ LF) marks every line as changed.
 - The background tints need a theme with true colors. With other themes, only the changed words are
   marked (reversed).
