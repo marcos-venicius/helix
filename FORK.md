@@ -104,7 +104,8 @@ are compared with their old path in HEAD.
 
 Long lines wrap when soft wrap is on for the file, as in the editor: the setting of its buffer when it
 is open, otherwise `soft-wrap.enable` of its language or of `[editor.soft-wrap]`. Continuation lines
-have no line number. `w` switches between wrapping and horizontal scrolling.
+have no line number, and scrolling goes one screen line at a time, so a line taller than the screen
+can be read whole. `w` switches between wrapping and horizontal scrolling.
 
 ### Limitations
 
