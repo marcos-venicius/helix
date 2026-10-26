@@ -175,6 +175,10 @@ shrinks to make room for it. Files and directories ignored by git (`.gitignore` 
 nested ones and the ones of parent directories, `.git/info/exclude` and the global excludes file)
 are shown dimmed instead of hidden. The `.git` directory is never listed.
 
+The panel grows past its configured width to fit the widest visible name, up to half the screen;
+turn `grow-with-content` off to keep it at the configured width and scroll sideways instead
+(`zh`/`zl`, shift + mouse wheel).
+
 Entries have file type icons (Nerd Font glyphs, colored by type), and the file of the current buffer
 is shown in bold. While the panel isn't focused, it follows the current buffer: switching to another
 file (a picker, `:open`, `gd`, ...) expands the tree down to it and selects it, unless the file is
@@ -244,6 +248,7 @@ hide-gitignored = false  # hide git ignored files instead of dimming them
 icons = true             # file type icons; needs a Nerd Font, turn off otherwise
 auto-reveal = true       # follow the current buffer while the panel isn't focused
 git-status = true        # mark files changed in git and the directories holding them
+grow-with-content = true # grow past `width` to fit the widest visible name, up to half the screen
 ```
 
 Theme scopes: `ui.explorer` (background, defaults to `ui.background`), `ui.explorer.ignored`

@@ -281,6 +281,9 @@ pub struct ExplorerConfig {
     /// Mark files changed in git (modified, added, untracked...) and the directories holding them.
     /// Defaults to true.
     pub git_status: bool,
+    /// Grow the panel past `width` to fit the widest visible name, up to half the screen.
+    /// Defaults to true.
+    pub grow_with_content: bool,
 }
 
 impl Default for ExplorerConfig {
@@ -291,6 +294,7 @@ impl Default for ExplorerConfig {
             icons: true,
             auto_reveal: true,
             git_status: true,
+            grow_with_content: true,
         }
     }
 }

@@ -154,9 +154,52 @@ impl Explorer {
         self.prefix = None;
     }
 
-    /// Width of the panel, leaving at least half of `available` to the editor.
+    /// Width of the panel, leaving at least half of `available` to the editor. Grows past the
+    /// configured width to fit the widest visible name, unless `explorer.grow-with-content` is off.
     pub fn width(&self, editor: &Editor, available: u16) -> u16 {
-        editor.config().explorer.width.min(available / 2)
+        let config = &editor.config().explorer;
+        let width = if config.grow_with_content {
+            config.width.max(self.content_width(editor))
+        } else {
+            config.width
+        };
+        width.min(available / 2)
+    }
+
+    /// Width needed to show the title and every visible node without truncating or scrolling
+    /// sideways.
+    fn content_width(&self, editor: &Editor) -> u16 {
+        let show_icons = editor.config().explorer.icons;
+        let show_git = editor.config().explorer.git_status;
+        let widest_node = self
+            .nodes
+            .iter()
+            .map(|node| node_width(node, self.expanded.contains(&node.path), show_icons))
+            .max()
+            .unwrap_or(0);
+        let marker_width = if show_git
+            && self
+                .nodes
+                .iter()
+                .any(|node| self.git.get(&node.path).is_some())
+        {
+            2
+        } else {
+            0
+        };
+        // +1 for the separator column on the right.
+        widest_node
+            .max(width(&self.title()))
+            .saturating_add(marker_width)
+            .saturating_add(1) as u16
+    }
+
+    /// Text of the panel's title row.
+    fn title(&self) -> String {
+        self.root
+            .file_name()
+            .map(|name| format!(" {}/", name.to_string_lossy()))
+            .unwrap_or_else(|| format!(" {}", self.root.display()))
     }
 
     fn sync_focus_target(&mut self, editor: &Editor) {
@@ -744,11 +787,7 @@ impl Explorer {
             theme.try_get("ui.cursorline.primary").unwrap_or_default()
         };
 
-        let title = self
-            .root
-            .file_name()
-            .map(|name| format!(" {}/", name.to_string_lossy()))
-            .unwrap_or_else(|| format!(" {}", self.root.display()));
+        let title = self.title();
         surface.set_stringn(
             content.x,
             content.y,
@@ -869,6 +908,27 @@ impl Explorer {
 
 fn width(text: &str) -> usize {
     text.chars().map(|ch| ch.width().unwrap_or(0)).sum()
+}
+
+/// Columns a node's row takes: the leading space, its indentation and chevron, its icon when
+/// shown, and its name (with a trailing `/` for directories). Mirrors the segments built in
+/// [`Explorer::render`].
+fn node_width(node: &Node, expanded: bool, show_icons: bool) -> usize {
+    // Leading space, two columns of indentation per depth, two-column chevron.
+    let mut total = 1 + node.depth * 2 + 2;
+    if show_icons {
+        let (glyph, _) = if node.is_dir {
+            icons::directory(expanded)
+        } else {
+            icons::file(&node.name)
+        };
+        total += width(glyph) + 1;
+    }
+    total += width(&node.name);
+    if node.is_dir {
+        total += 1;
+    }
+    total
 }
 
 /// What remains of `text` after its first `skip` columns, taking them off `skip`. A wide character
