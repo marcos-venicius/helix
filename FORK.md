@@ -186,8 +186,8 @@ file (a picker, `:open`, `gd`, ...) expands the tree down to it and selects it, 
 inside a directory ignored by git (`target`, `node_modules`).
 
 Files changed in git are marked like in VS Code's explorer: the name takes the color of the change
-and a letter shows on the right, `M` modified, `A` added (staged), `U` untracked, `R` renamed and
-`!` in conflict. Directories holding changes, deleted files included, show a `●` in the color of
+and a letter shows on the right, at least one column away from the name: `M` modified, `A` added
+(staged), `U` untracked, `R` renamed and `!` in conflict. Directories holding changes, deleted files included, show a `●` in the color of
 their most important change (conflict, then modified, deleted, renamed, added, untracked).
 
 Not to be confused with upstream's `space e`, which opens the file explorer picker.
@@ -211,6 +211,7 @@ Not to be confused with upstream's `space e`, which opens the file explorer pick
 | `zj`/`zk` | Scroll down/up one row. |
 | `zh`/`zl`, shift + mouse wheel | Scroll sideways, to read names cut by the width of the panel. The git markers stay in place. |
 | `gh`/`gl` | Scroll sideways all the way to the start / to the end of the longest name on screen. |
+| `]g`/`[g` | Go to the next/previous file changed in git, below/above the selected entry in the order of the tree. Collapsed directories on the way are expanded, the file isn't opened. Stops at the last/first one, without wrapping around. |
 | `?` | Show the keys in the status line. |
 | `Esc`, `C-w l` | Give the focus back to the editor. From the leftmost view, `C-w h` focuses the panel again. |
 | `q` | Close the panel. |
@@ -234,7 +235,8 @@ refused when one of them has unsaved changes. Moves and renames never overwrite 
 
 The tree is updated from disk when the panel gets the focus and after each operation. Directory
 listings of the expanded directories are kept: only the directories whose modification time changed
-(or their `.gitignore`'s, with everything below it) are read again. `R` reads everything again. When the working directory
+(or their `.gitignore`'s, with everything below it) are read again. `R` reads everything again,
+and so do `:reload` and `:reload-all`, even with the panel unfocused. When the working directory
 changes (`:cd`), the tree follows it on the next update.
 
 The git status is read in the background (the same as `space g`) on each of those updates and when
