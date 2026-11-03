@@ -39,11 +39,16 @@ use git_status::GitStatus;
 use gitignore::{DirRules, Matcher, Outer};
 
 const HELP: &str = "a: new (end with / for a directory)  r: rename  x: cut  p: paste  d: delete  \
-                    R: refresh  H: show/hide git ignored  g: goto  z: view  q: close  esc: back to the editor";
+                    R: refresh  H: show/hide git ignored  ]g/[g: next/previous change  g: goto  z: view  \
+                    q: close  esc: back to the editor";
 
 const VIEW_HELP: &str = "z/c: center  t: top  b: bottom  j/k: scroll  h/l: scroll sideways";
 
 const GOTO_HELP: &str = "g: top  e: bottom  h: scroll to the start  l: scroll to the end";
+
+/// Columns of the git markers on the right: a space after the names, the marker, and a space
+/// before the separator.
+const MARKER_WIDTH: u16 = 3;
 
 /// Columns moved by a sideways scroll: two levels of indentation.
 const SIDEWAYS: usize = 4;
@@ -71,7 +76,7 @@ pub struct Explorer {
     scroll: usize,
     /// Columns of the entries scrolled out on the left.
     hscroll: usize,
-    /// `z` or `g` was pressed, the next key completes the command (`zz`, `gl`...).
+    /// `z`, `g`, `]` or `[` was pressed, the next key completes the command (`zz`, `gl`, `]g`...).
     prefix: Option<char>,
     git: GitStatus,
     /// Screen area of the panel and of its list of nodes in the last render, for mouse events.
@@ -183,7 +188,7 @@ impl Explorer {
                 .iter()
                 .any(|node| self.git.get(&node.path).is_some())
         {
-            2
+            MARKER_WIDTH as usize
         } else {
             0
         };
@@ -472,8 +477,19 @@ impl Explorer {
                 self.view_key(key);
                 return Some(KeyResult::Handled);
             }
-            Some(_) => {
+            Some('g') => {
                 self.goto_key(key);
+                return Some(KeyResult::Handled);
+            }
+            Some(bracket) => {
+                if key == key!('g') {
+                    let forward = bracket == ']';
+                    if !self.jump_to_change(forward) {
+                        let direction = if forward { "below" } else { "above" };
+                        cx.editor
+                            .set_status(format!("No changed file {direction} the cursor"));
+                    }
+                }
                 return Some(KeyResult::Handled);
             }
             None => {}
@@ -529,6 +545,15 @@ impl Explorer {
                 self.prefix = Some('g');
                 cx.editor.set_status(GOTO_HELP);
             }
+            key!(']') | key!('[') => {
+                let (bracket, direction) = match key {
+                    key!(']') => (']', "next"),
+                    _ => ('[', "previous"),
+                };
+                self.prefix = Some(bracket);
+                cx.editor
+                    .set_status(format!("g: {direction} file changed in git"));
+            }
             key!('?') => cx.editor.set_status(HELP),
             key!(Esc) => self.unfocus(),
             key!('q') => return Some(KeyResult::Close),
@@ -567,6 +592,39 @@ impl Explorer {
             key!('l') => self.hscroll = usize::MAX,
             _ => {}
         }
+    }
+
+    /// `]g` and `[g`: selects the next (or previous) file marked by git after the cursor, in the
+    /// order of the tree, expanding the directories on the way. Stops at the last one, without
+    /// wrapping around. Returns whether there was one to go to.
+    fn jump_to_change(&mut self, forward: bool) -> bool {
+        let current = self
+            .selected()
+            .map(|node| tree_key(&self.root, &node.path, node.is_dir));
+        let mut files: Vec<(TreeKey, PathBuf)> = self
+            .git
+            .paths()
+            // Directories are marked for the changes below them.
+            .filter(|path| !path.is_dir())
+            .map(|path| (tree_key(&self.root, path, false), path.to_path_buf()))
+            .filter(|(key, _)| match &current {
+                Some(current) if forward => key > current,
+                Some(current) => key < current,
+                None => true,
+            })
+            .collect();
+        files.sort_unstable();
+        if !forward {
+            files.reverse();
+        }
+        // A file that can't be shown (hidden as ignored) is skipped.
+        for (_, path) in files {
+            self.reveal(&path, true);
+            if self.selected().is_some_and(|node| node.path == path) {
+                return true;
+            }
+        }
+        false
     }
 
     /// Scrolls the list by `delta` rows, dragging the cursor along when it would leave the screen.
@@ -868,7 +926,7 @@ impl Explorer {
 
         // Room for the git markers on the right, when there are any.
         let marker_width = if rows.iter().any(|(_, mark, _)| mark.is_some()) {
-            2
+            MARKER_WIDTH
         } else {
             0
         };
@@ -897,7 +955,7 @@ impl Explorer {
                 surface.set_stringn(
                     names.right(),
                     y,
-                    &format!("{marker} "),
+                    &format!(" {marker} "),
                     marker_width as usize,
                     mark.style(theme),
                 );
@@ -929,6 +987,24 @@ fn node_width(node: &Node, expanded: bool, show_icons: bool) -> usize {
         total += 1;
     }
     total
+}
+
+/// Sorts paths in the order of the tree: component by component, directories before files, then by
+/// name ignoring case, like [`list_dir`]. A directory comes before what it holds.
+type TreeKey = Vec<(bool, String, String)>;
+
+fn tree_key(root: &Path, path: &Path, is_dir: bool) -> TreeKey {
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    let count = relative.components().count();
+    relative
+        .components()
+        .enumerate()
+        .map(|(index, component)| {
+            let name = component.as_os_str().to_string_lossy();
+            let dir = index + 1 < count || is_dir;
+            (!dir, name.to_lowercase(), name.into_owned())
+        })
+        .collect()
 }
 
 /// What remains of `text` after its first `skip` columns, taking them off `skip`. A wide character
@@ -999,6 +1075,24 @@ fn refresh_later(cx: &mut compositor::Context, path: PathBuf, moved_from: Option
                 }
             },
         )))
+    });
+}
+
+/// `:reload` and `:reload-all` read the tree from disk again too, like `R`, once the command has
+/// run.
+pub fn reload_later(cx: &mut compositor::Context) {
+    cx.jobs.callback(async move {
+        Ok(Callback::EditorCompositor(Box::new(|editor, compositor| {
+            let explorer = compositor
+                .find::<EditorView>()
+                .and_then(|view| view.explorer.as_mut());
+            if let Some(explorer) = explorer {
+                explorer.reload(editor);
+                if explorer.focused {
+                    explorer.sync_focus_target(editor);
+                }
+            }
+        })))
     });
 }
 
@@ -1621,6 +1715,84 @@ mod tests {
         let keymaps = Keymaps::new(Box::new(arc_swap::ArcSwap::from_pointee(keymap)));
         assert_eq!(route(&keymaps, Mode::Normal, &[key!(',')]), Route::Keymap);
         assert_eq!(route(&keymaps, Mode::Normal, &[key!(' ')]), Route::Panel);
+    }
+
+    #[test]
+    fn jumps_between_changed_files_in_tree_order() {
+        use git_status::Mark;
+        let dir = repo();
+        let root = dir.path();
+        let mut explorer = Explorer::empty(root.to_path_buf());
+        explorer.hiding = true;
+        explorer.rebuild();
+        explorer.git.set(
+            [
+                ("README.md", Mark::Modified),
+                ("src/main.rs", Mark::Added),
+                ("src/nested/public.txt", Mark::Untracked),
+                ("src", Mark::Added),
+                ("src/nested", Mark::Untracked),
+                // Hidden as ignored, skipped.
+                ("target/debug/app", Mark::Modified),
+                ("target/debug", Mark::Modified),
+                ("target", Mark::Modified),
+            ]
+            .map(|(path, mark)| (root.join(path), mark)),
+        );
+        let selected = |explorer: &Explorer| {
+            let path = &explorer.selected().unwrap().path;
+            path.strip_prefix(root).unwrap().to_string_lossy().into_owned()
+        };
+        assert_eq!(selected(&explorer), "src");
+
+        // Collapsed directories are expanded on the way.
+        assert!(explorer.jump_to_change(true));
+        assert_eq!(selected(&explorer), "src/nested/public.txt");
+        assert!(explorer.jump_to_change(true));
+        assert_eq!(selected(&explorer), "src/main.rs");
+        assert!(explorer.jump_to_change(true));
+        assert_eq!(selected(&explorer), "README.md");
+        // No wrapping around.
+        assert!(!explorer.jump_to_change(true));
+        assert_eq!(selected(&explorer), "README.md");
+
+        assert!(explorer.jump_to_change(false));
+        assert_eq!(selected(&explorer), "src/main.rs");
+        assert!(explorer.jump_to_change(false));
+        assert_eq!(selected(&explorer), "src/nested/public.txt");
+        assert!(!explorer.jump_to_change(false));
+        assert_eq!(selected(&explorer), "src/nested/public.txt");
+
+        // From a directory, the files inside it come next.
+        explorer.select(&root.join("src"));
+        assert!(explorer.jump_to_change(true));
+        assert_eq!(selected(&explorer), "src/nested/public.txt");
+    }
+
+    #[test]
+    fn tree_order_puts_directories_first() {
+        let root = Path::new("/r");
+        let key = |path: &str, is_dir| tree_key(root, &root.join(path), is_dir);
+        let mut paths = vec![
+            key("b.txt", false),
+            key("A.txt", false),
+            key("z/inner.rs", false),
+            key("z", true),
+            key("a/b/c.rs", false),
+            key("a/d.rs", false),
+        ];
+        paths.sort();
+        assert_eq!(
+            paths,
+            [
+                key("a/b/c.rs", false),
+                key("a/d.rs", false),
+                key("z", true),
+                key("z/inner.rs", false),
+                key("A.txt", false),
+                key("b.txt", false),
+            ]
+        );
     }
 
     #[test]

@@ -82,6 +82,16 @@ impl GitStatus {
         self.marks.get(path).copied()
     }
 
+    /// The changed files, and the directories holding changes.
+    pub fn paths(&self) -> impl Iterator<Item = &Path> {
+        self.marks.keys().map(PathBuf::as_path)
+    }
+
+    #[cfg(test)]
+    pub fn set(&mut self, marks: impl IntoIterator<Item = (PathBuf, Mark)>) {
+        self.marks = marks.into_iter().collect();
+    }
+
     /// Runs `git status` on `root` in the background. Without the `git-status` option, or outside
     /// a runtime (tests), the marks are only cleared.
     pub fn request(&mut self, root: &Path, editor: &Editor) {

@@ -1590,6 +1590,7 @@ fn reload(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> anyh
         return Ok(());
     }
 
+    ui::explorer::reload_later(cx);
     let scrolloff = cx.editor.config().scrolloff;
     let trust_full = doc_trust_full(cx.editor);
     let (view, doc) = current!(cx.editor);
@@ -1611,6 +1612,7 @@ fn reload_all(cx: &mut compositor::Context, _args: Args, event: PromptEvent) -> 
         return Ok(());
     }
 
+    ui::explorer::reload_later(cx);
     reload_documents(cx.editor, false);
     Ok(())
 }
