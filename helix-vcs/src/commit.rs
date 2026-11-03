@@ -7,6 +7,6 @@ pub struct CommitInfo {
     /// First line of the message.
     pub summary: String,
     pub author: String,
-    /// Author date, `YYYY-MM-DD`.
+    /// Author date and time in the author's time zone, `YYYY-MM-DD HH:MM`.
     pub date: String,
 }

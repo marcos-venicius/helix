@@ -356,7 +356,7 @@ fn commit_log_lists_changes_and_contents() {
     let summaries = std::sync::Mutex::new(Vec::new());
     git::for_each_commit(repo, true, |commit| {
         let commit = commit.unwrap();
-        assert_eq!(commit.date, "2000-01-01");
+        assert_eq!(commit.date, "2000-01-01 00:00");
         summaries.lock().unwrap().push(commit.summary);
         true
     })

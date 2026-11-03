@@ -126,7 +126,7 @@ fn commit_info(commit: &Commit) -> Result<CommitInfo> {
         author: author.name.to_string(),
         date: author
             .time()?
-            .format_or_unix(gix::date::time::format::SHORT),
+            .format_or_unix(gix::date::time::CustomFormat::new("%Y-%m-%d %H:%M")),
     })
 }
 
