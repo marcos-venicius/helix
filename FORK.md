@@ -123,8 +123,9 @@ can be read whole. `w` switches between wrapping and horizontal scrolling.
 
 ## Git commit log
 
-A picker of the commits reachable from HEAD, newest first, with their short id, date, author and
-summary. Choosing a commit lists the files it changed, and choosing a file opens the
+A picker of the commits reachable from HEAD, newest first, with their short id, date and time (in
+the author's time zone), author and summary. Choosing a commit lists the files it changed, and
+choosing a file opens the
 [side by side diff](#side-by-side-git-diff) of that file in the commit: its version in the
 commit's parent on the left, in the commit on the right.
 
