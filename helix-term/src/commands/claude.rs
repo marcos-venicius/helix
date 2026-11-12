@@ -16,6 +16,8 @@ struct Location {
     reference: Option<String>,
     /// Short description for the session picker, e.g. `src/main.rs:12`.
     label: String,
+    /// Whether the primary selection is more than the cursor.
+    selected: bool,
     /// System prompt addition describing the file, line and selection.
     context: String,
 }
@@ -79,6 +81,7 @@ fn current_location(editor: &Editor) -> anyhow::Result<Location> {
     Ok(Location {
         reference,
         label,
+        selected,
         context,
     })
 }
@@ -111,10 +114,12 @@ fn new_session(
     Ok(())
 }
 
-/// Shows an existing session, pasting a reference to the current location into its prompt.
+/// Shows an existing session. When something is selected, a reference to it is pasted into the
+/// prompt; with only a cursor, the popup just opens.
 fn reopen_session(editor: &mut Editor, compositor: &mut Compositor, session: Arc<Session>) {
     if let Ok(Location {
         reference: Some(reference),
+        selected: true,
         ..
     }) = current_location(editor)
     {

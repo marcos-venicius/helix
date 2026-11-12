@@ -35,9 +35,10 @@ is hidden, so you can switch between Claude and the code without losing the conv
 | `:claude <prompt>` | Start a new session and send `<prompt>` as the first message. |
 | `C-\` (inside the popup) | Hide the popup. The session keeps running. |
 
-When you reopen a session from another file or line, a reference such as `@src/main.rs#L10-20` is
-pasted into Claude's prompt, without sending it, so you can ask about that spot. Reopening from the
-same spot pastes nothing.
+When you reopen a session with something selected, a reference to the selection such as
+`@src/main.rs#L10-20` (or `#L10` for a single line) is pasted into Claude's prompt, without sending
+it, so you can ask about that spot. With nothing selected (only the cursor), the popup just opens
+and nothing is pasted. Reopening with the same selection again pastes nothing.
 
 Every other key, the mouse and pastes go to Claude, so its own shortcuts work in the popup.
 Examples: `PageUp`/`PageDown` or the mouse wheel to scroll, `C-o` for the transcript, `/exit` to end
