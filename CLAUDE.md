@@ -17,6 +17,7 @@ code lives:
 | Staged files in the changed files picker | `status()` and its helpers in `helix-vcs/src/git.rs`, `FileChange::Added` in `helix-vcs/src/status.rs` |
 | File explorer side panel | `helix-term/src/ui/explorer.rs` and `helix-term/src/ui/explorer/` (icons, git ignore rules, git status markers); `changed_files` in `helix-vcs/src/lib.rs`; hooks in `EditorView` (`helix-term/src/ui/editor.rs`), `ExplorerConfig` in `helix-view/src/editor.rs`; benchmarks in `helix-term/benches/explorer.rs` |
 | Markdown table formatting | `helix-term/src/commands/markdown_table.rs` |
+| Blacksite theme | `runtime/themes/blacksite.toml` |
 
 ## Branches
 

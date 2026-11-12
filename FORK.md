@@ -11,6 +11,7 @@ as in the [Helix documentation](https://docs.helix-editor.com/).
 - [Staged files in the changed files picker](#staged-files-in-the-changed-files-picker)
 - [File explorer side panel](#file-explorer-side-panel)
 - [Markdown table formatting](#markdown-table-formatting)
+- [Blacksite theme](#blacksite-theme)
 
 To build and install the fork, from the `marcos` branch:
 
@@ -329,3 +330,21 @@ What is formatted:
 
 - Format the table on save in Markdown files, as an opt-in setting.
 - Commands to add, delete and move columns, and to move between cells with `Tab`.
+
+## Blacksite theme
+
+A near-black dark theme with green phosphor accents: green keywords, cyan functions, amber strings
+and a green, amber or cyan cursor and status line for normal, insert and select mode.
+
+### Usage
+
+```toml
+theme = "blacksite"
+```
+
+Or `:theme blacksite` to try it. Matching colors for Alacritty and tmux live in the
+config-manager dotfiles, which use it as the dark theme of the system theme.
+
+### Limitations
+
+- It needs true colors. On a 256 color terminal the near-black shades collapse into each other.
