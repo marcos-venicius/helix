@@ -52,13 +52,19 @@ Remotes:
 (`https://marcos-venicius.github.io/helix/`) by `.github/workflows/fork-site.yml` on pushes to
 `marcos` that touch `site/`. The Pages source is "GitHub Actions": upstream's `gh-pages.yml` still
 pushes the Helix book to the `gh-pages` branch on `master`, but that branch isn't served. The page
-is a single HTML file with no build step, styled with the Catppuccin Mocha palette (the editor's
-`catppuccin_mocha` theme, which the screenshots use too) and JetBrains Mono from Google Fonts. It summarizes the features and links to
+is a single HTML file with no build step, styled with the editor's `github_light` (light) and
+`blacksite` (dark) palettes and JetBrains Mono from Google Fonts. It follows the system color scheme,
+and a button in the header cycles system, light and dark (saved in `localStorage`, applied by an
+inline script in the `<head>` so the page doesn't flash). It summarizes the features and links to
 FORK.md for the details, and its "Read this first" section says what the fork is (a personal build,
-no stability or release guarantees, AI-assisted). Each feature has a screenshot in `site/screenshots/`
-(WebP, 1600px wide): `hx` captured in a 130x34 tmux pane with the `catppuccin_mocha` theme, the
-pane's ANSI output turned into HTML and photographed with headless Chrome. When a feature's look
-changes, retake its screenshot the same way.
+no stability or release guarantees, AI-assisted). Each feature has two screenshots in `site/screenshots/`,
+`<name>-light.webp` (`github_light`) and `<name>-dark.webp` (`blacksite`), WebP 1600x1020, and the
+page shows the pair matching its theme. They are `hx` in a 130x34 tmux pane (with `mouse` and
+`focus-events` on, so Claude Code shows no tmux hints), the pane's `capture-pane -e` output turned
+into HTML (JetBrainsMono Nerd Font Mono 20px, 28px rows, a window bar on top; the 16 ANSI colors
+taken from the Alacritty palettes of the same themes) and photographed with headless Chrome. Scenes
+that need git state (explorer markers, changed files) run in a scratch clone named `helix` on a
+`marcos` branch. When a feature's look changes, retake both of its screenshots the same way.
 
 Link previews and SEO live in the `<head>` of `site/index.html`: description, canonical URL, Open
 Graph and Twitter Card tags and JSON-LD. They use absolute URLs under
