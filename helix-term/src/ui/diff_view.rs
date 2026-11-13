@@ -37,15 +37,17 @@ pub struct Side {
 }
 
 impl Side {
-    pub fn new(title: String, text: String, path: &Path, editor: &Editor) -> Side {
+    /// Syntax highlights the whole text, which takes a while for a large file: call it off the
+    /// main thread.
+    pub fn new(
+        title: String,
+        text: String,
+        path: &Path,
+        loader: &syntax::Loader,
+        theme: &Theme,
+    ) -> Side {
         let lines = line_ranges(&text);
-        let highlights = highlight(
-            &text,
-            &lines,
-            path,
-            &editor.syn_loader.load(),
-            &editor.theme,
-        );
+        let highlights = highlight(&text, &lines, path, loader, theme);
         Side {
             title,
             text,
@@ -368,7 +370,7 @@ impl Palette {
     }
 }
 
-type OnOpen = Box<dyn FnOnce(&mut Compositor)>;
+pub type OnOpen = Box<dyn FnOnce(&mut Compositor) + Send>;
 
 pub struct DiffView {
     left: Side,
@@ -401,6 +403,12 @@ pub struct DiffView {
     /// Index of the current hunk in `hunks`. Tracked explicitly because several hunks can map
     /// to the same scroll position (near the top or bottom, or when everything fits on screen).
     current: usize,
+    /// Whether the current hunk was brought into view. Done on the first render that knows the
+    /// widths, and so the height of wrapped lines.
+    positioned: bool,
+    /// While the diff is computed in the background: a token telling this request apart from
+    /// later ones, and the path shown meanwhile.
+    loading: Option<(u64, String)>,
 }
 
 impl DiffView {
@@ -434,11 +442,35 @@ impl DiffView {
             visible: 0,
             pending: None,
             current: 0,
+            positioned: false,
+            loading: None,
         }
     }
 
+    /// A placeholder shown at once while the diff is computed, so keys go to it (`q` cancels)
+    /// rather than to what is below. Replaced by the diff when it is ready.
+    pub fn loading(token: u64, label: String) -> DiffView {
+        let empty = || Side {
+            title: String::new(),
+            text: String::new(),
+            lines: Vec::new(),
+            highlights: Vec::new(),
+        };
+        let mut view = DiffView::new(empty(), empty(), None, 4);
+        view.loading = Some((token, label));
+        view
+    }
+
+    /// The token of the request this placeholder waits for, if it is one.
+    pub fn loading_token(&self) -> Option<u64> {
+        self.loading.as_ref().map(|(token, _)| *token)
+    }
+
     /// Runs `on_open` on the compositor when Enter opens the file.
-    pub fn with_on_open(mut self, on_open: impl FnOnce(&mut Compositor) + 'static) -> DiffView {
+    pub fn with_on_open(
+        mut self,
+        on_open: impl FnOnce(&mut Compositor) + Send + 'static,
+    ) -> DiffView {
         self.on_open = Some(Box::new(on_open));
         self
     }
@@ -555,8 +587,48 @@ impl DiffView {
             self.current.saturating_sub(1)
         };
         if let Some(&hunk) = self.hunks.get(self.current) {
-            self.set_position(hunk.saturating_sub(HUNK_CONTEXT), 0);
+            self.show_hunk(hunk);
         }
+    }
+
+    /// Scrolls so the hunk starting at row `hunk` is at the top, below `HUNK_CONTEXT` lines of
+    /// context. When lines wrap, the context is counted in screen lines, and a long changed line
+    /// is scrolled to its first changed word: rows above it can be taller than the screen.
+    fn show_hunk(&mut self, hunk: usize) {
+        if !self.wrap || self.text_widths.0 == 0 || self.text_widths.1 == 0 {
+            self.set_position(hunk.saturating_sub(HUNK_CONTEXT), 0);
+            return;
+        }
+        let (mut scroll, mut offset) = (hunk, self.first_change_line(&self.rows[hunk]));
+        for _ in 0..HUNK_CONTEXT {
+            if offset > 0 {
+                offset -= 1;
+            } else if scroll > 0 {
+                scroll -= 1;
+                offset = self.row_height(&self.rows[scroll]) - 1;
+            } else {
+                break;
+            }
+        }
+        self.set_position(scroll, offset);
+    }
+
+    /// Screen line of `row` holding its first changed word, on either side: 0 unless the row
+    /// is a changed line that wraps.
+    fn first_change_line(&self, row: &Row) -> usize {
+        let (left_width, right_width) = self.text_widths;
+        let line_of = |side: &Side, line: Option<usize>, words: &[Range<usize>], width: usize| {
+            let (line, start) = (line?, words.first()?.start);
+            let mut found = 0;
+            layout(side.line(line), self.tab_width, Some(width), |byte, _, _, row, _| {
+                found = row;
+                byte < start
+            });
+            Some(found)
+        };
+        let left = line_of(&self.left, row.left, &row.left_words, left_width);
+        let right = line_of(&self.right, row.right, &row.right_words, right_width);
+        left.into_iter().chain(right).min().unwrap_or(0)
     }
 
     /// Rows of the current hunk.
@@ -610,6 +682,14 @@ impl DiffView {
     }
 
     fn handle_key(&mut self, key: &KeyEvent) -> EventResult {
+        if self.loading.is_some() {
+            let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+            return match key.code {
+                KeyCode::Char('q') | KeyCode::Esc => Self::close(),
+                KeyCode::Char('c') if ctrl => Self::close(),
+                _ => EventResult::Consumed(None),
+            };
+        }
         let half_page = (self.height / 2).max(1) as isize;
         let page = self.height.max(1) as isize;
 
@@ -817,6 +897,59 @@ fn layout(
     (row + 1, col)
 }
 
+/// Where the parts of the view go, for an area of at least 10x3.
+struct Layout {
+    body: Rect,
+    left_area: Rect,
+    right_area: Rect,
+    separator_x: u16,
+    half: u16,
+    number_width: usize,
+}
+
+impl DiffView {
+    /// Lays the view out in `area`, and fits the scroll position to it: the widths may have
+    /// changed, and the height of wrapped rows with them.
+    fn update_layout(&mut self, area: Rect) -> Layout {
+        let body = Rect::new(area.x, area.y + 1, area.width, area.height - 2);
+        let half = (area.width - 1) / 2;
+        let left_area = Rect::new(area.x, body.y, half, body.height);
+        let separator_x = area.x + half;
+        let right_area = Rect::new(separator_x + 1, body.y, area.width - half - 1, body.height);
+        let number_width = self
+            .left
+            .lines
+            .len()
+            .max(self.right.lines.len())
+            .max(1)
+            .to_string()
+            .len();
+        // the gutter: line number, a space, the sign and a space
+        let text_width = |area: Rect| (area.width as usize).saturating_sub(number_width + 3);
+        self.text_widths = (text_width(left_area), text_width(right_area));
+        self.height = body.height as usize;
+        self.set_position(self.scroll, self.offset);
+        let widths_known = self.text_widths.0 > 0 && self.text_widths.1 > 0;
+        if !self.positioned && (!self.wrap || widths_known) {
+            self.positioned = true;
+            if let Some(&hunk) = self.hunks.get(self.current) {
+                self.show_hunk(hunk);
+            }
+        }
+        let first_height = self.rows.get(self.scroll).map_or(1, |row| self.row_height(row));
+        self.offset = self.offset.min(first_height - 1);
+        self.hscroll = self.hscroll.min(self.max_hscroll());
+        Layout {
+            body,
+            left_area,
+            right_area,
+            separator_x,
+            half,
+            number_width,
+        }
+    }
+}
+
 impl Component for DiffView {
     fn handle_event(&mut self, event: &Event, _cx: &mut Context) -> EventResult {
         match event {
@@ -842,30 +975,22 @@ impl Component for DiffView {
         if area.height < 3 || area.width < 10 {
             return;
         }
+        if let Some((_, label)) = &self.loading {
+            let text = format!("Computing the diff of {label}…");
+            let width = text.chars().count().min(area.width as usize);
+            let x = area.x + (area.width - width as u16) / 2;
+            surface.set_stringn(x, area.y + area.height / 2, &text, width, palette.hint);
+            return;
+        }
 
-        let body = Rect::new(area.x, area.y + 1, area.width, area.height - 2);
-
-        let half = (area.width - 1) / 2;
-        let left_area = Rect::new(area.x, body.y, half, body.height);
-        let separator_x = area.x + half;
-        let right_area = Rect::new(separator_x + 1, body.y, area.width - half - 1, body.height);
-        let number_width = self
-            .left
-            .lines
-            .len()
-            .max(self.right.lines.len())
-            .max(1)
-            .to_string()
-            .len();
-        // the gutter: line number, a space, the sign and a space
-        let text_width = |area: Rect| (area.width as usize).saturating_sub(number_width + 3);
-        self.text_widths = (text_width(left_area), text_width(right_area));
-        self.height = body.height as usize;
-        // the widths may have changed, and the row heights with them
-        self.set_position(self.scroll, self.offset);
-        let first_height = self.rows.get(self.scroll).map_or(1, |row| self.row_height(row));
-        self.offset = self.offset.min(first_height - 1);
-        self.hscroll = self.hscroll.min(self.max_hscroll());
+        let Layout {
+            body,
+            left_area,
+            right_area,
+            separator_x,
+            half,
+            number_width,
+        } = self.update_layout(area);
 
         // header with the title of each side
         surface.set_style(Rect::new(area.x, area.y, area.width, 1), palette.title);
@@ -996,6 +1121,96 @@ mod test {
                 ("    ".into(), 1, 0)
             ]
         );
+    }
+
+    #[test]
+    fn hunks_are_shown_by_screen_lines_when_wrapping() {
+        let side = |text: &str| Side {
+            title: String::new(),
+            lines: line_ranges(text),
+            highlights: vec![Vec::new(); line_ranges(text).len()],
+            text: text.to_string(),
+        };
+        // 200 columns: 10 screen lines at a width of 20
+        let long = "word ".repeat(40);
+        let filler = "x\n".repeat(40);
+        let view = |before: String, after: String| {
+            let mut view = DiffView::new(side(&before), side(&after), None, 4).with_soft_wrap(true);
+            view.text_widths = (20, 20);
+            view.height = 10;
+            view
+        };
+
+        // The context above a hunk is 3 screen lines, not 3 rows: the row above is 10 lines
+        // tall, so 3 rows would push the hunk off the screen.
+        let mut short = view(
+            format!("{long}\nold\n{filler}"),
+            format!("{long}\nnew\n{filler}"),
+        );
+        short.show_hunk(short.hunks[0]);
+        assert_eq!((short.scroll, short.offset), (0, 7));
+
+        // A long line changed at its end is scrolled to the screen line of the change.
+        let mut end = view(
+            format!("{long}\n{long}\n{long}\n{long}end\n{filler}"),
+            format!("{long}\n{long}\n{long}\n{long}END\n{filler}"),
+        );
+        assert_eq!(end.hunks, [3]);
+        assert_eq!(end.first_change_line(&end.rows[3]), 10);
+        end.show_hunk(end.hunks[0]);
+        assert_eq!((end.scroll, end.offset), (3, 7));
+
+        // Without wrapping, the context is 3 rows.
+        end.wrap = false;
+        end.show_hunk(end.hunks[0]);
+        assert_eq!((end.scroll, end.offset), (0, 0));
+    }
+
+    #[test]
+    fn placeholder_only_closes() {
+        let mut view = DiffView::loading(7, "a.rs".into());
+        assert_eq!(view.loading_token(), Some(7));
+        let key = |code| KeyEvent {
+            code,
+            modifiers: KeyModifiers::NONE,
+        };
+        // nothing to open or scroll yet
+        assert!(matches!(
+            view.handle_key(&key(KeyCode::Enter)),
+            EventResult::Consumed(None)
+        ));
+        assert!(matches!(
+            view.handle_key(&key(KeyCode::Char('q'))),
+            EventResult::Consumed(Some(_))
+        ));
+    }
+
+    #[test]
+    fn first_render_shows_the_current_hunk() {
+        let side = |text: &str| Side {
+            title: String::new(),
+            lines: line_ranges(text),
+            highlights: vec![Vec::new(); line_ranges(text).len()],
+            text: text.to_string(),
+        };
+        let long = "word ".repeat(40);
+        let filler = "x\n".repeat(40);
+        let before = format!("{long}\na\n{filler}{long}\nb\n{filler}");
+        let after = format!("{long}\nA\n{filler}{long}\nB\n{filler}");
+        let mut view = DiffView::new(side(&before), side(&after), None, 4).with_soft_wrap(true);
+        assert_eq!(view.hunks, [1, 43]);
+        // `n` before the first render: the widths aren't known yet
+        view.jump_to_hunk(true);
+        assert_eq!(view.current, 1);
+
+        view.update_layout(Rect::new(0, 0, 60, 12));
+        // positioned on the current hunk, 3 screen lines below the top
+        let above: usize = view.rows[view.scroll..43]
+            .iter()
+            .map(|row| view.row_height(row))
+            .sum::<usize>()
+            - view.offset;
+        assert_eq!(above, 3);
     }
 
     #[test]

@@ -109,6 +109,14 @@ is open, otherwise `soft-wrap.enable` of its language or of `[editor.soft-wrap]`
 have no line number, and scrolling goes one screen line at a time, so a line taller than the screen
 can be read whole. `w` switches between wrapping and horizontal scrolling.
 
+Jumping to a hunk keeps 3 lines of context above it. With wrapping, those are screen lines, and a
+long changed line is scrolled to the screen line of its first changed word, so the change is always
+on screen even when the lines around it are paragraphs.
+
+Both versions are highlighted in the background, in parallel, so a large file doesn't freeze the
+editor: the diff opens at once with a "Computing the diff…" message and fills in when it's ready.
+`q`/`Esc` meanwhile cancels it. An unchanged file says "No changes" right away.
+
 ### Limitations
 
 - Binary files can't be shown.
