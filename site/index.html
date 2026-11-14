@@ -240,6 +240,15 @@
   .notice li { margin: 8px 0; }
   .notice li strong { color: var(--warn-text); }
 
+  /* smaller differences, without a screenshot */
+  .changes { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+  .changes li { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 16px 18px; }
+  .changes h3 { font-family: var(--mono); margin: 0 0 6px; font-size: 1rem; color: var(--accent); }
+  .changes p { margin: 0; color: var(--muted); }
+  @media (max-width: 720px) {
+    .changes { grid-template-columns: 1fr; }
+  }
+
   .features { display: flex; flex-direction: column; gap: 56px; }
   .feature {
     display: grid;
@@ -372,6 +381,29 @@
             use AI tools heavily to move faster on the fork's changes.</li>
         </ul>
       </div>
+    </div>
+  </section>
+
+  <section id="small-changes">
+    <div class="wrap">
+      <h2>Smaller changes</h2>
+      <p class="sub">
+        Differences from upstream that don't need a screenshot. The details are in
+        <a href="https://github.com/marcos-venicius/helix/blob/marcos/FORK.md">FORK.md</a> too.
+      </p>
+      <ul class="changes">
+        <li>
+          <h3>Binary files aren't opened</h3>
+          <p>Upstream opens images, executables and archives as text, which can corrupt them on save.
+            Here they are refused with a message in the status line, from the command line,
+            <code>:open</code>, the pickers or the explorer.</p>
+        </li>
+        <li>
+          <h3>Blacksite theme</h3>
+          <p>A near-black dark theme with green phosphor accents, the one this page uses in dark mode.
+            Set <code>theme = "blacksite"</code> in your config.</p>
+        </li>
+      </ul>
     </div>
   </section>
 
