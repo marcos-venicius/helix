@@ -158,6 +158,7 @@ impl Application {
             // If there are any more files specified, open them
             if files_it.peek().is_some() {
                 let mut nr_of_files = 0;
+                let mut binary_files = Vec::new();
                 for (file, pos) in files_it {
                     nr_of_files += 1;
                     if file.is_dir() {
@@ -181,6 +182,16 @@ impl Application {
                             // Ignore irregular files during application init.
                             Err(DocumentOpenError::IrregularFile) => {
                                 nr_of_files -= 1;
+                                continue;
+                            }
+                            // Binary files are skipped too, and reported once all files are open.
+                            Err(DocumentOpenError::BinaryFile(_)) => {
+                                nr_of_files -= 1;
+                                binary_files.push(
+                                    helix_stdx::path::get_relative_path(&file)
+                                        .display()
+                                        .to_string(),
+                                );
                                 continue;
                             }
                             Err(err) => return Err(anyhow::anyhow!(err)),
@@ -220,6 +231,12 @@ impl Application {
                     // does not affect views without pos since it is at the top
                     let (view, doc) = current!(editor);
                     align_view(doc, view, Align::Center);
+                }
+                if !binary_files.is_empty() {
+                    editor.set_error(format!(
+                        "binary files can't be opened: {}",
+                        binary_files.join(", ")
+                    ));
                 }
             } else {
                 editor.new_file(Action::VerticalSplit);

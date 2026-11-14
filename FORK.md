@@ -11,6 +11,7 @@ as in the [Helix documentation](https://docs.helix-editor.com/).
 - [Staged files in the changed files picker](#staged-files-in-the-changed-files-picker)
 - [File explorer side panel](#file-explorer-side-panel)
 - [Markdown table formatting](#markdown-table-formatting)
+- [Binary files are not opened](#binary-files-are-not-opened)
 - [Blacksite theme](#blacksite-theme)
 
 To build and install the fork, from the `marcos` branch:
@@ -339,6 +340,40 @@ What is formatted:
 
 - Format the table on save in Markdown files, as an opt-in setting.
 - Commands to add, delete and move columns, and to move between cells with `Tab`.
+
+## Binary files are not opened
+
+Upstream Helix opens any file as text, so an image, an executable or a zip turns into a buffer
+full of garbage that can be edited and saved, corrupting the file. The fork refuses to open binary
+files: the buffer isn't created and the status line says
+`binary file can't be opened: <path>`.
+
+### Usage
+
+Nothing to configure. It applies to every way of opening a file: the command line, `:open`, the
+file and changed files pickers, the file explorer, `gf`, goto definition and the other LSP jumps.
+
+With several files on the command line (`hx logo.png notes.txt`), the text files open and the
+binary ones are listed in a single message. If all of them are binary, Helix starts with an empty
+buffer.
+
+A file is binary when its first kilobyte has a NUL byte, or it starts with the PDF or PNG magic
+number. That covers executables, archives and most image formats. Files starting with a byte-order
+mark are text (UTF-16 and UTF-32 have NUL bytes). This is the same check upstream uses to show
+`<Binary file>` in the picker preview.
+
+### Limitations
+
+- Binary formats with no NUL byte in their first kilobyte are still opened as text.
+- Text files with a NUL byte near the start (some logs, or UTF-16 without a byte-order mark) are
+  refused too, and there is no way to force them open.
+- A file that becomes binary while it is open is still reloaded as text.
+
+### Ideas
+
+- A `:open!` (or a config option) to force a binary file open as text.
+- A read-only hex view instead of the error.
+- Open the file with the system's default application, as `gf` already does for binary file URLs.
 
 ## Blacksite theme
 

@@ -2142,6 +2142,11 @@ impl Editor {
         let id = if let Some(id) = id {
             id
         } else {
+            if crate::binary::is_binary_file(&path) {
+                return Err(DocumentOpenError::BinaryFile(
+                    crate::binary::BinaryFileError::new(&path),
+                ));
+            }
             let mut doc = Document::open(
                 &path,
                 None,

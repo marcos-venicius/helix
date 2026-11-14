@@ -17,6 +17,7 @@ code lives:
 | Staged files in the changed files picker | `status()` and its helpers in `helix-vcs/src/git.rs`, `FileChange::Added` in `helix-vcs/src/status.rs` |
 | File explorer side panel | `helix-term/src/ui/explorer.rs` and `helix-term/src/ui/explorer/` (icons, git ignore rules, git status markers); `changed_files` in `helix-vcs/src/lib.rs`; hooks in `EditorView` (`helix-term/src/ui/editor.rs`), `ExplorerConfig` in `helix-view/src/editor.rs`; benchmarks in `helix-term/benches/explorer.rs` |
 | Markdown table formatting | `helix-term/src/commands/markdown_table.rs` |
+| Binary files are not opened | `helix-view/src/binary.rs`; the check in `Editor::open` (`helix-view/src/editor.rs`), `DocumentOpenError::BinaryFile` in `helix-view/src/document.rs`, the startup file loop in `helix-term/src/application.rs` |
 | Blacksite theme | `runtime/themes/blacksite.toml` |
 
 ## Branches
@@ -44,7 +45,9 @@ Remotes:
   news.
 - Every PR that adds or changes a fork feature updates [FORK.md](FORK.md) (usage, limitations, ideas)
   and the code table in [Fork features](#fork-features). A new feature, or a change to its main
-  keys, also updates its card in [site/index.html](site/index.html).
+  keys, also updates its card in [site/index.html](site/index.html). A small difference that has no
+  screenshot (a behaviour change, a theme) gets a short text entry in the page's "Smaller changes"
+  section instead of a card.
 
 ## Site
 
@@ -56,7 +59,9 @@ is a single HTML file with no build step, styled with the editor's `github_light
 `blacksite` (dark) palettes and JetBrains Mono from Google Fonts. It follows the system color scheme,
 and a button in the header cycles system, light and dark (saved in `localStorage`, applied by an
 inline script in the `<head>` so the page doesn't flash). It summarizes the features and links to
-FORK.md for the details, and its "Read this first" section says what the fork is (a personal build,
+FORK.md for the details. The features with screenshots are cards in "What the fork adds"; above
+them, "Smaller changes" lists the differences without a screenshot, as short text entries. Its
+"Read this first" section says what the fork is (a personal build,
 no stability or release guarantees, AI-assisted). Each feature has two screenshots in `site/screenshots/`,
 `<name>-light.webp` (`github_light`) and `<name>-dark.webp` (`blacksite`), WebP 1600x1020, and the
 page shows the pair matching its theme. They are `hx` in a 130x34 tmux pane (with `mouse` and
@@ -130,6 +135,10 @@ the same spots:
 - `helix-vcs/src/lib.rs`, `helix-vcs/src/status.rs`: we add the commit log methods and
   `changed_files` (for the explorer) to `DiffProviderRegistry` and `DiffProvider`, and `#[derive(Clone)]` to `FileChange`. Keep both
   sides.
+- `Editor::open` in `helix-view/src/editor.rs` calls `binary::is_binary_file` before
+  `Document::open`, and `DocumentOpenError` has a `BinaryFile` variant. The startup loop in
+  `Application::new` (`helix-term/src/application.rs`) skips binary files like irregular ones and
+  reports them after the loop. Keep upstream's version and re-add those pieces.
 - `helix-term/Cargo.toml`: we add a `bench` feature, `criterion` to the dev-dependencies and the
   `explorer` `[[bench]]`. Keep both sides.
 - `Cargo.lock`: take upstream's version, then run `cargo build` to add our dependencies back

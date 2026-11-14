@@ -134,6 +134,8 @@ pub struct SavePoint {
 pub enum DocumentOpenError {
     #[error("path must be a regular file, symlink, or directory")]
     IrregularFile,
+    #[error("{0}")]
+    BinaryFile(#[source] crate::binary::BinaryFileError),
     #[error(transparent)]
     IoError(#[from] io::Error),
 }
