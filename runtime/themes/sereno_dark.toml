@@ -1,0 +1,126 @@
+# Sereno Dark
+# Dark theme for a dim room. Pairs with sereno_light. Fork-only (marcos-venicius/helix).
+# Built for legibility: the syntax colors share one perceived lightness (OKLCH), and every one of
+# them keeps its contrast on the diff view's changed word highlight.
+
+"ui.background" = { bg = "bg" }
+"ui.text" = "fg"
+"ui.text.focus" = { fg = "strong", bg = "sel" }
+"ui.text.inactive" = "dim"
+"ui.text.directory" = "function"
+"ui.cursor" = { fg = "bg", bg = "dim" }
+"ui.cursor.primary" = { fg = "bg", bg = "fg" }
+"ui.cursor.primary.insert" = { fg = "bg", bg = "function" }
+"ui.cursor.primary.select" = { fg = "bg", bg = "keyword" }
+"ui.cursor.match" = { fg = "strong", bg = "edge", modifiers = ["bold"] }
+"ui.cursorline.primary" = { bg = "line" }
+"ui.selection" = { bg = "sel" }
+"ui.selection.primary" = { bg = "sel2" }
+"ui.highlight" = { bg = "line" }
+"ui.gutter" = { bg = "bg" }
+"ui.linenr" = "mute"
+"ui.linenr.selected" = { fg = "fg", modifiers = ["bold"] }
+"ui.statusline" = { fg = "fg", bg = "panel" }
+"ui.statusline.inactive" = { fg = "dim", bg = "panel" }
+"ui.statusline.normal" = { fg = "bg", bg = "function", modifiers = ["bold"] }
+"ui.statusline.insert" = { fg = "bg", bg = "string", modifiers = ["bold"] }
+"ui.statusline.select" = { fg = "bg", bg = "keyword", modifiers = ["bold"] }
+"ui.bufferline" = { fg = "dim", bg = "panel" }
+"ui.bufferline.active" = { fg = "strong", bg = "bg", underline = { color = "function", style = "line" } }
+"ui.bufferline.background" = { bg = "panel" }
+"ui.window" = "edge"
+"ui.popup" = { fg = "fg", bg = "panel" }
+"ui.popup.info" = { fg = "fg", bg = "panel" }
+"ui.help" = { fg = "fg", bg = "panel" }
+"ui.menu" = { fg = "fg", bg = "panel" }
+"ui.menu.selected" = { fg = "strong", bg = "sel2" }
+"ui.menu.scroll" = { fg = "dim", bg = "panel" }
+"ui.picker.header" = { fg = "function", modifiers = ["bold"] }
+"ui.virtual.whitespace" = "ws"
+"ui.virtual.indent-guide" = "edge"
+"ui.virtual.ruler" = { bg = "panel" }
+"ui.virtual.wrap" = "ws"
+"ui.virtual.inlay-hint" = "dim"
+"ui.virtual.jump-label" = { fg = "red", modifiers = ["bold"] }
+"ui.debug.breakpoint" = "red"
+"ui.debug.active" = "amber"
+
+"error" = "red"
+"warning" = "amber"
+"info" = "blue"
+"hint" = "dim"
+"diagnostic.error" = { underline = { color = "red", style = "curl" } }
+"diagnostic.warning" = { underline = { color = "amber", style = "curl" } }
+"diagnostic.info" = { underline = { color = "blue", style = "curl" } }
+"diagnostic.hint" = { underline = { color = "dim", style = "dotted" } }
+"diagnostic.unnecessary" = { modifiers = ["dim"] }
+"diagnostic.deprecated" = { modifiers = ["crossed_out"] }
+
+# The diff view blends these over the background: 15% on a changed line, 40% on a changed word.
+"diff.plus" = "plus"
+"diff.minus" = "minus"
+"diff.delta" = "delta"
+"diff.delta.moved" = "blue"
+
+"keyword" = "keyword"
+"function" = "function"
+"function.builtin" = "function"
+"function.macro" = "keyword"
+"constructor" = "type"
+"type" = "type"
+"type.builtin" = "type"
+"namespace" = "type"
+"string" = "string"
+"string.regexp" = "constant"
+"string.special" = "constant"
+"constant" = "constant"
+"constant.numeric" = "constant"
+"constant.builtin" = "constant"
+"constant.character.escape" = "keyword"
+"comment" = "comment"
+"variable" = "fg"
+"variable.parameter" = "fg"
+"variable.builtin" = "constant"
+"variable.other.member" = "fg"
+"attribute" = "keyword"
+"label" = "keyword"
+"operator" = "punct"
+"punctuation" = "punct"
+"tag" = "keyword"
+"special" = "function"
+
+"markup.heading" = { fg = "function", modifiers = ["bold"] }
+"markup.bold" = { modifiers = ["bold"] }
+"markup.italic" = { modifiers = ["italic"] }
+"markup.strikethrough" = { modifiers = ["crossed_out"] }
+"markup.link.url" = { fg = "blue", underline = { style = "line" } }
+"markup.link.text" = "function"
+"markup.raw" = "string"
+"markup.list" = "keyword"
+"markup.quote" = "comment"
+
+[palette]
+bg = "#171a1d"
+line = "#1c2024"
+panel = "#1d2125"
+sel = "#27364a"
+sel2 = "#2b415c"
+edge = "#2c3136"
+ws = "#31363c"
+mute = "#676c73"
+dim = "#81878d"
+punct = "#bab7af"
+fg = "#dad7cf"
+strong = "#eae8e0"
+comment = "#bdaf99"
+keyword = "#e2b5ec"
+function = "#9fcbfe"
+type = "#93d9d9"
+string = "#acd9a2"
+constant = "#f5bd94"
+red = "#ed756e"
+amber = "#e6b55d"
+blue = "#73b0ee"
+minus = "#c34f51"
+plus = "#2ba1a7"
+delta = "#c29647"
